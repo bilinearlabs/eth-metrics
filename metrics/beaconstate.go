@@ -52,7 +52,8 @@ func (p *BeaconState) Run(
 	poolName string,
 	currentBeaconState *spec.VersionedBeaconState,
 	prevBeaconState *spec.VersionedBeaconState,
-	valKeyToIndex map[string]uint64) error {
+	valKeyToIndex map[string]uint64,
+	relayRewards *big.Int) error {
 
 	if currentBeaconState == nil || prevBeaconState == nil {
 		return errors.New("current or previous beacon state is nil")
@@ -90,6 +91,8 @@ func (p *BeaconState) Run(
 	if err != nil {
 		return errors.Wrap(err, "error populating participation and balance")
 	}
+
+	metrics.MEVRewards = relayRewards
 
 	syncCommitteeKeys := BLSPubKeyToByte(GetCurrentSyncCommittee(currentBeaconState))
 	syncCommitteeIndexes := GetIndexesFromKeys(syncCommitteeKeys, valKeyToIndex)
@@ -243,6 +246,10 @@ func (p *BeaconState) GetBeaconState(epoch uint64) (*spec.VersionedBeaconState, 
 	defer cancel()
 	opts := api.BeaconStateOpts{
 		State: slotStr,
+		// Override http client timeout
+		Common: api.CommonOpts{
+			Timeout: time.Second * time.Duration(p.config.StateTimeout),
+		},
 	}
 	beaconState, err := p.consensus.BeaconState(
 		ctxTimeout,

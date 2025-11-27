@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS t_pools_metrics_summary (
 	 f_n_valitadors_with_less_balace BIGINT,
 	 f_epoch_earned_balance BIGINT,
 	 f_epoch_lost_balace BIGINT,
+	 f_mev_rewards BIGINT,
 
 	 f_n_scheduled_blocks BIGINT,
 	 f_n_proposed_blocks BIGINT,
@@ -77,8 +78,9 @@ INSERT INTO t_pools_metrics_summary(
 	f_n_validating_keys,
 	f_n_valitadors_with_less_balace,
 	f_epoch_earned_balance,
-	f_epoch_lost_balace)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	f_epoch_lost_balace,
+	f_mev_rewards)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
    f_timestamp=EXCLUDED.f_timestamp,
@@ -90,7 +92,8 @@ DO UPDATE SET
 	 f_n_validating_keys=EXCLUDED.f_n_validating_keys,
 	 f_n_valitadors_with_less_balace=EXCLUDED.f_n_valitadors_with_less_balace,
 	 f_epoch_earned_balance=EXCLUDED.f_epoch_earned_balance,
-	 f_epoch_lost_balace=EXCLUDED.f_epoch_lost_balace
+	 f_epoch_lost_balace=EXCLUDED.f_epoch_lost_balace,
+	 f_mev_rewards=EXCLUDED.f_mev_rewards
 `
 
 // TODO: Add f_epoch_timestamp
@@ -178,7 +181,9 @@ func (a *Database) StoreValidatorPerformance(validatorPerformance schemas.Valida
 		validatorPerformance.NOfValidatingKeys,
 		validatorPerformance.NOfValsWithLessBalance,
 		validatorPerformance.EarnedBalance.Int64(),
-		validatorPerformance.LosedBalance.Int64())
+		validatorPerformance.LosedBalance.Int64(),
+		validatorPerformance.MEVRewards.Int64(),
+	)
 
 	if err != nil {
 		return err

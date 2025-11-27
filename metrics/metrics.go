@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"encoding/base64"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/rs/zerolog"
 
 	"github.com/bilinearlabs/eth-metrics/config"
@@ -28,12 +30,15 @@ type NetworkParameters struct {
 }
 
 type Metrics struct {
-	networkParameters *NetworkParameters
-	config            *config.Config
-	db                *db.Database
-	httpClient        *http.Service
-	beaconState       *BeaconState
-	proposalDuties    *ProposalDuties
+	networkParameters    *NetworkParameters
+	config               *config.Config
+	db                   *db.Database
+	httpClient           *http.Service
+	validatorKeysPerPool map[string][][]byte
+	validatorKeyToPool   map[string]string
+	beaconState          *BeaconState
+	proposalDuties       *ProposalDuties
+	relayRewards         *RelayRewards
 }
 
 func NewMetrics(
@@ -54,13 +59,31 @@ func NewMetrics(
 		}
 	}
 
-	for _, poolName := range config.PoolNames {
-		if strings.HasSuffix(poolName, ".txt") {
-			pubKeysDeposited, err := pools.ReadCustomValidatorsFile(poolName)
-			if err != nil {
-				log.Fatal(err)
+	var validatorKeysPerPool map[string][][]byte
+	var validatorKeyToPool map[string]string
+
+	if config.ValidatorsFile != "" {
+		validatorKeysPerPool, validatorKeyToPool, err = pools.ReadValidatorsFile(config.ValidatorsFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "error reading validators file")
+		}
+	} else {
+		// TODO check if mantain reading from txt files
+		validatorKeysPerPool = make(map[string][][]byte)
+		validatorKeyToPool = make(map[string]string)
+		for _, poolName := range config.PoolNames {
+			if strings.HasSuffix(poolName, ".txt") {
+				pubKeysDeposited, err := pools.ReadCustomValidatorsFile(poolName)
+				if err != nil {
+					log.Fatal(err)
+				}
+				validatorKeysPerPool[poolName] = pubKeysDeposited
+				for _, key := range pubKeysDeposited {
+					keyStr := hexutil.Encode(key)
+					validatorKeyToPool[keyStr] = poolName
+				}
+				log.Info("File: ", poolName, " contains ", len(pubKeysDeposited), " keys")
 			}
-			log.Info("File: ", poolName, " contains ", len(pubKeysDeposited), " keys")
 		}
 	}
 
@@ -118,10 +141,12 @@ func NewMetrics(
 	}
 
 	return &Metrics{
-		networkParameters: networkParameters,
-		db:                database,
-		httpClient:        httpClient,
-		config:            config,
+		networkParameters:    networkParameters,
+		db:                   database,
+		httpClient:           httpClient,
+		config:               config,
+		validatorKeysPerPool: validatorKeysPerPool,
+		validatorKeyToPool:   validatorKeyToPool,
 	}, nil
 }
 
@@ -150,6 +175,12 @@ func (a *Metrics) Run() {
 		log.Fatal(err)
 	}
 	a.proposalDuties = pd
+
+	rr, err := NewRelayRewards(a.networkParameters, a.validatorKeyToPool, a.config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	a.relayRewards = rr
 
 	for _, poolName := range a.config.PoolNames {
 		// Check that the validator keys are correct
@@ -292,17 +323,24 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
-	// Iterate all pools and calculate metrics using the fetched data
-	for _, poolName := range a.config.PoolNames {
-		poolName, pubKeys, err := a.GetValidatorKeys(poolName)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting validator keys")
-		}
+	relayRewardsPerPool, err := a.relayRewards.GetRelayRewards(currentEpoch)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting relay rewards")
+	}
+	// TODO remove loop
+	for poolName, reward := range relayRewardsPerPool {
+		log.Info("Pool: ", poolName, " Reward: ", reward)
+	}
 
+	// Iterate all pools and calculate metrics using the fetched data
+	for poolName, pubKeys := range a.validatorKeysPerPool {
 		validatorIndexes := GetIndexesFromKeys(pubKeys, valKeyToIndex)
 
-		// TODO Rename this
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex)
+		relayRewards := big.NewInt(0)
+		if reward, ok := relayRewardsPerPool[poolName]; ok {
+			relayRewards.Add(relayRewards, reward)
+		}
+		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}

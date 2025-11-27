@@ -13,6 +13,7 @@ var ReleaseVersion = "custom-build"
 
 type Config struct {
 	PoolNames      []string
+	ValidatorsFile string
 	DatabasePath   string
 	Eth1Address    string
 	Eth2Address    string
@@ -43,6 +44,7 @@ func NewCliConfig() (*Config, error) {
 	// Allows passing multiple times
 	flag.Var(&poolNames, "pool-name", "Pool name to monitor. Can be useed multiple times")
 
+	var validatorsFile = flag.String("validators-file", "", "csv file with entities and their validator keys")
 	var version = flag.Bool("version", false, "Prints the release version and exits")
 	var network = flag.String("network", "ethereum", "ethereum|gnosis")
 	var databasePath = flag.String("database-path", "", "Database path: db.db (optional)")
@@ -63,6 +65,7 @@ func NewCliConfig() (*Config, error) {
 
 	conf := &Config{
 		PoolNames:      poolNames,
+		ValidatorsFile: *validatorsFile,
 		DatabasePath:   *databasePath,
 		Eth1Address:    *eth1Address,
 		Eth2Address:    *eth2Address,
@@ -80,6 +83,7 @@ func NewCliConfig() (*Config, error) {
 func logConfig(cfg *Config) {
 	log.WithFields(log.Fields{
 		"PoolNames":      cfg.PoolNames,
+		"ValidatorsFile": cfg.ValidatorsFile,
 		"DatabasePath":   cfg.DatabasePath,
 		"Eth1Address":    cfg.Eth1Address,
 		"Eth2Address":    cfg.Eth2Address,

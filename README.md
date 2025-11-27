@@ -83,6 +83,24 @@ This example will monitor the performance of `pool_a` and `pool_b` and store in 
 --pool-name=pool_b.txt \
 ```
 
+Another option is to place in	`pools.csv` file the validators keys you want to track.
+
+```csv
+pool_a,0xaddc693f9090db30a9aae27c047a95245f60313f574fb32729dd06341db55c743e64ba0709ee74181750b6da5f234b44
+pool_b,0xa59af0999c83f66de6cab8d833169fe10bce102d466c60c97c4e927210ac56e687c53feac8937c905cec5e87fccd72ce
+```
+
+And pass the `--validators-file` flag:
+
+```console
+./eth-metrics \
+--eth1address=https://your-execution-endpoint \
+--eth2address=https://your-consensus-endpoint \
+--verbosity=debug \
+--database-path=db.db \
+--validators-file=keys.csv \
+```
+
 You can access the content of the database directly, or by using the API that allows to pass raw queries. For example, you can get the metrics from the latest epoch for `pool_a` as follows.
 
 ```
