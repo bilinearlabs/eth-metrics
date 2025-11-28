@@ -502,6 +502,7 @@ func logMetrics(
 		"ValidadorKeyMissedAtt":       metrics.IndexesMissedAtt,
 		"ValidadorKeyLessBalance":     metrics.IndexesLessBalance,
 		"DeltaEpochBalance":           metrics.DeltaEpochBalance,
+		"epochMEVRewards":             metrics.MEVRewards,
 	}).Info(poolName + " Stats:")
 }
 

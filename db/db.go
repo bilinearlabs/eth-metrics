@@ -24,9 +24,9 @@ CREATE TABLE IF NOT EXISTS t_pools_metrics_summary (
 	 f_n_incorrect_head BIGINT,
 	 f_n_validating_keys BIGINT,
 	 f_n_valitadors_with_less_balace BIGINT,
-	 f_epoch_earned_balance BIGINT,
-	 f_epoch_lost_balace BIGINT,
-	 f_mev_rewards BIGINT,
+	 f_epoch_earned_balance_gwei BIGINT,
+	 f_epoch_lost_balace_gwei BIGINT,
+	 f_mev_rewards_wei BIGINT,
 
 	 f_n_scheduled_blocks BIGINT,
 	 f_n_proposed_blocks BIGINT,
@@ -77,9 +77,9 @@ INSERT INTO t_pools_metrics_summary(
 	f_n_incorrect_head,
 	f_n_validating_keys,
 	f_n_valitadors_with_less_balace,
-	f_epoch_earned_balance,
-	f_epoch_lost_balace,
-	f_mev_rewards)
+	f_epoch_earned_balance_gwei,
+	f_epoch_lost_balace_gwei,
+	f_mev_rewards_wei)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
@@ -91,9 +91,9 @@ DO UPDATE SET
 	 f_n_incorrect_head=EXCLUDED.f_n_incorrect_head,
 	 f_n_validating_keys=EXCLUDED.f_n_validating_keys,
 	 f_n_valitadors_with_less_balace=EXCLUDED.f_n_valitadors_with_less_balace,
-	 f_epoch_earned_balance=EXCLUDED.f_epoch_earned_balance,
-	 f_epoch_lost_balace=EXCLUDED.f_epoch_lost_balace,
-	 f_mev_rewards=EXCLUDED.f_mev_rewards
+	 f_epoch_earned_balance_gwei=EXCLUDED.f_epoch_earned_balance_gwei,
+	 f_epoch_lost_balace_gwei=EXCLUDED.f_epoch_lost_balace_gwei,
+	 f_mev_rewards_wei=EXCLUDED.f_mev_rewards_wei
 `
 
 // TODO: Add f_epoch_timestamp
