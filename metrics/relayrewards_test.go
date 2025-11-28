@@ -57,8 +57,8 @@ func TestGetRelayRewards_Success(t *testing.T) {
 	// Each slot (2 slots) * each relay server (1 server) = 2 requests
 	// pool1: 2 * 1 ETH = 2 ETH
 	// pool2: 2 * 2 ETH = 4 ETH
-	assert.Equal(t, uint64(2000000000000000000), rewards["pool1"])
-	assert.Equal(t, uint64(4000000000000000000), rewards["pool2"])
+	assert.Equal(t, big.NewInt(2000000000000000000), rewards["pool1"])
+	assert.Equal(t, big.NewInt(4000000000000000000), rewards["pool2"])
 }
 
 func TestGetRelayRewards_HTTPError(t *testing.T) {

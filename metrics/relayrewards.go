@@ -55,9 +55,12 @@ func (r *RelayRewards) GetRelayRewards(
 		reward *big.Int
 	}, len(RELAY_SERVERS)*int(slotsInEpoch))
 	var wg sync.WaitGroup
+	var consumerWg sync.WaitGroup
 
 	// Consumer
+	consumerWg.Add(1)
 	go func() {
+		defer consumerWg.Done()
 		for result := range results {
 			if _, ok := poolRewards[result.pool]; !ok {
 				poolRewards[result.pool] = big.NewInt(0)
@@ -84,13 +87,13 @@ func (r *RelayRewards) GetRelayRewards(
 				for _, payload := range payloads {
 					pool, ok := r.validatorKeyToPool[payload.ProposerPubkey]
 					if !ok {
-						return
+						continue
 					}
 					// bigint
 					value, ok := big.NewInt(0).SetString(payload.Value, 10)
 					if !ok {
 						log.Errorf("failed to parse value: %s", payload.Value)
-						return
+						continue
 					}
 					results <- struct {
 						pool   string
@@ -102,6 +105,7 @@ func (r *RelayRewards) GetRelayRewards(
 	}
 	wg.Wait()
 	close(results)
+	consumerWg.Wait()
 
 	return poolRewards, nil
 }
