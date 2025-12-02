@@ -114,11 +114,15 @@ func ReadValidatorsFile(validatorsFile string) (poolValidatorKeys map[string][][
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
-		fields := strings.Split(line, ",")
-		if len(fields) != 2 {
-			return poolValidatorKeys, validatorKeyToPool, errors.New("the format of the file is not the expected: entity1,key1")
+		// Skip first line
+		if line == "Validator Index,Public Key,Entity (Pool Name),Sub-Pool" {
+			continue
 		}
-		entity := fields[0]
+		fields := strings.Split(line, ",")
+		if len(fields) != 4 {
+			return poolValidatorKeys, validatorKeyToPool, errors.New("the format of the file is not the expected: Validator Index,Public Key,Entity (Pool Name),Sub-Pool")
+		}
+		entity := fields[2]
 		keyStr := fields[1]
 
 		if !strings.HasPrefix(keyStr, "0x") {

@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS t_pools_metrics_summary (
 	 f_n_valitadors_with_less_balace BIGINT,
 	 f_epoch_earned_balance_gwei BIGINT,
 	 f_epoch_lost_balace_gwei BIGINT,
+	 f_epoch_effective_balance_gwei BIGINT,
 	 f_mev_rewards_wei BIGINT,
 
 	 f_n_scheduled_blocks BIGINT,
@@ -77,10 +78,11 @@ INSERT INTO t_pools_metrics_summary(
 	f_n_incorrect_head,
 	f_n_validating_keys,
 	f_n_valitadors_with_less_balace,
+	f_epoch_effective_balance_gwei,
 	f_epoch_earned_balance_gwei,
 	f_epoch_lost_balace_gwei,
 	f_mev_rewards_wei)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
    f_timestamp=EXCLUDED.f_timestamp,
@@ -91,6 +93,7 @@ DO UPDATE SET
 	 f_n_incorrect_head=EXCLUDED.f_n_incorrect_head,
 	 f_n_validating_keys=EXCLUDED.f_n_validating_keys,
 	 f_n_valitadors_with_less_balace=EXCLUDED.f_n_valitadors_with_less_balace,
+	 f_epoch_effective_balance_gwei=EXCLUDED.f_epoch_effective_balance_gwei,
 	 f_epoch_earned_balance_gwei=EXCLUDED.f_epoch_earned_balance_gwei,
 	 f_epoch_lost_balace_gwei=EXCLUDED.f_epoch_lost_balace_gwei,
 	 f_mev_rewards_wei=EXCLUDED.f_mev_rewards_wei
@@ -180,6 +183,7 @@ func (a *Database) StoreValidatorPerformance(validatorPerformance schemas.Valida
 		validatorPerformance.NOfIncorrectHead,
 		validatorPerformance.NOfValidatingKeys,
 		validatorPerformance.NOfValsWithLessBalance,
+		validatorPerformance.EffectiveBalance.Int64(),
 		validatorPerformance.EarnedBalance.Int64(),
 		validatorPerformance.LosedBalance.Int64(),
 		validatorPerformance.MEVRewards.Int64(),

@@ -28,6 +28,7 @@ var RELAY_SERVERS = []string{
 }
 
 type RelayRewards struct {
+	httpClient         *http.Client
 	networkParameters  *NetworkParameters
 	validatorKeyToPool map[string]string
 	config             *config.Config
@@ -38,6 +39,7 @@ func NewRelayRewards(
 	validatorKeyToPool map[string]string,
 	config *config.Config) (*RelayRewards, error) {
 	return &RelayRewards{
+		httpClient:         &http.Client{Timeout: 60 * time.Second},
 		networkParameters:  networkParameters,
 		validatorKeyToPool: validatorKeyToPool,
 		config:             config,
@@ -111,16 +113,16 @@ func (r *RelayRewards) GetRelayRewards(
 }
 
 func (r *RelayRewards) getRewards(relayServer string, slot uint64) ([]common.BidTraceV2JSON, error) {
-	resp, err := http.Get(fmt.Sprintf("%s/relay/v1/data/bidtraces/proposer_payload_delivered?slot=%d", relayServer, slot))
+	resp, err := r.httpClient.Get(fmt.Sprintf("%s/relay/v1/data/bidtraces/proposer_payload_delivered?slot=%d", relayServer, slot))
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting rewards")
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, errors.New(fmt.Sprintf("non-200 status: %d", resp.StatusCode))
 	}
 
-	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, errors.Wrap(err, "error reading response body")

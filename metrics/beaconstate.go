@@ -187,9 +187,11 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	prevBalance, prevEffectiveBalance := GetTotalBalanceAndEffective(activeValidatorIndexes, prevBeaconState)
 
 	// Make sure we are comparing apples to apples
-	if currentEffectiveBalance.Cmp(prevEffectiveBalance) != 0 {
+	effectiveBalanceDiff := new(big.Int).Sub(currentEffectiveBalance, prevEffectiveBalance)
+	effectiveBalanceDiff.Abs(effectiveBalanceDiff)
+	if effectiveBalanceDiff.Cmp(big.NewInt(0)) != 0 && effectiveBalanceDiff.Cmp(big.NewInt(1000000000)) < 0 { // > 0 && < 1 ETH
 		return schemas.ValidatorPerformanceMetrics{},
-			errors.New(fmt.Sprint("Can't calculate delta balances, effective balances are different:",
+			errors.New(fmt.Sprint("Can't calculate delta balances for pool: ", poolName, ", effective balances are different by less than 1 ETH:",
 				currentEffectiveBalance, " vs ", prevEffectiveBalance))
 	}
 

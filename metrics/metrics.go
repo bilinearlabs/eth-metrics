@@ -327,10 +327,6 @@ func (a *Metrics) ProcessEpoch(
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting relay rewards")
 	}
-	// TODO remove loop
-	for poolName, reward := range relayRewardsPerPool {
-		log.Info("Pool: ", poolName, " Reward: ", reward)
-	}
 
 	// Iterate all pools and calculate metrics using the fetched data
 	for poolName, pubKeys := range a.validatorKeysPerPool {
