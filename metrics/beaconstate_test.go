@@ -86,7 +86,8 @@ func Test_GetValidatorsWithLessBalance(t *testing.T) {
 	indexLessBalance, earnedBalance, lostBalance, err := b.GetValidatorsWithLessBalance(
 		[]uint64{0, 1, 2, 3},
 		prevBeaconState,
-		currentBeaconState)
+		currentBeaconState,
+		map[uint64]*big.Int{})
 
 	require.NoError(t, err)
 	require.Equal(t, indexLessBalance, []uint64{0, 2})
@@ -116,7 +117,8 @@ func Test_GetValidatorsWithLessBalance_NonConsecutive(t *testing.T) {
 	_, _, _, err := b.GetValidatorsWithLessBalance(
 		[]uint64{},
 		prevBeaconState,
-		currentBeaconState)
+		currentBeaconState,
+		map[uint64]*big.Int{})
 
 	require.Error(t, err)
 }

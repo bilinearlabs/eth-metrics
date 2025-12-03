@@ -13,6 +13,7 @@ import (
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
+	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/rs/zerolog"
 
@@ -328,6 +329,11 @@ func (a *Metrics) ProcessEpoch(
 		return nil, errors.Wrap(err, "error getting relay rewards")
 	}
 
+	// Get withdrawals from all blocks of the epoch
+	validatorIndexToWithdrawalAmount, err := a.GetEpochWithdrawals(currentEpoch)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting epoch withdrawals")
+	}
 	// Iterate all pools and calculate metrics using the fetched data
 	for poolName, pubKeys := range a.validatorKeysPerPool {
 		validatorIndexes := GetIndexesFromKeys(pubKeys, valKeyToIndex)
@@ -336,7 +342,7 @@ func (a *Metrics) ProcessEpoch(
 		if reward, ok := relayRewardsPerPool[poolName]; ok {
 			relayRewards.Add(relayRewards, reward)
 		}
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards)
+		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}
@@ -374,4 +380,51 @@ func (a *Metrics) GetValidatorKeys(poolName string) (string, [][]byte, error) {
 
 	}
 	return poolName, pubKeysDeposited, nil
+}
+
+func (a *Metrics) GetEpochWithdrawals(epoch uint64) (map[uint64]*big.Int, error) {
+	validatorIndexToWithdrawalAmount := make(map[uint64]*big.Int)
+	firstSlot := epoch * a.networkParameters.slotsInEpoch
+	for slot := firstSlot; slot < firstSlot+a.networkParameters.slotsInEpoch; slot++ {
+		slotStr := strconv.FormatUint(slot, 10)
+		opts := api.SignedBeaconBlockOpts{
+			Block: slotStr,
+		}
+
+		beaconBlock, err := a.httpClient.SignedBeaconBlock(
+			context.Background(),
+			&opts,
+		)
+		if err != nil {
+			log.Warn("block not found for slot: ", slot)
+			continue
+		}
+		withdrawals := GetBlockWithdrawals(beaconBlock.Data)
+
+		for _, withdrawal := range withdrawals {
+			if _, ok := validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)]; !ok {
+				validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)] = big.NewInt(0)
+			}
+			validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)].Add(validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)], big.NewInt(int64(withdrawal.Amount)))
+		}
+	}
+	return validatorIndexToWithdrawalAmount, nil
+}
+
+func GetBlockWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock) []*capella.Withdrawal {
+	var withdrawals []*capella.Withdrawal
+	if beaconBlock.Altair != nil {
+		withdrawals = []*capella.Withdrawal{}
+	} else if beaconBlock.Bellatrix != nil {
+		withdrawals = []*capella.Withdrawal{}
+	} else if beaconBlock.Capella != nil {
+		withdrawals = beaconBlock.Capella.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Deneb != nil {
+		withdrawals = beaconBlock.Deneb.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Electra != nil {
+		withdrawals = beaconBlock.Electra.Message.Body.ExecutionPayload.Withdrawals
+	} else {
+		log.Fatal("Beacon state was empty")
+	}
+	return withdrawals
 }

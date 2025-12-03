@@ -53,7 +53,8 @@ func (p *BeaconState) Run(
 	currentBeaconState *spec.VersionedBeaconState,
 	prevBeaconState *spec.VersionedBeaconState,
 	valKeyToIndex map[string]uint64,
-	relayRewards *big.Int) error {
+	relayRewards *big.Int,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) error {
 
 	if currentBeaconState == nil || prevBeaconState == nil {
 		return errors.New("current or previous beacon state is nil")
@@ -86,7 +87,8 @@ func (p *BeaconState) Run(
 		poolName,
 		activeValidatorIndexes,
 		currentBeaconState,
-		prevBeaconState)
+		prevBeaconState,
+		validatorIndexToWithdrawalAmount)
 
 	if err != nil {
 		return errors.Wrap(err, "error populating participation and balance")
@@ -169,7 +171,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	poolName string,
 	activeValidatorIndexes []uint64,
 	beaconState *spec.VersionedBeaconState,
-	prevBeaconState *spec.VersionedBeaconState) (schemas.ValidatorPerformanceMetrics, error) {
+	prevBeaconState *spec.VersionedBeaconState,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) (schemas.ValidatorPerformanceMetrics, error) {
 
 	metrics := schemas.ValidatorPerformanceMetrics{
 		EarnedBalance:    big.NewInt(0),
@@ -201,7 +204,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	lessBalanceIndexes, earnedBalance, lostBalance, err := p.GetValidatorsWithLessBalance(
 		activeValidatorIndexes,
 		prevBeaconState,
-		beaconState)
+		beaconState,
+		validatorIndexToWithdrawalAmount)
 
 	if err != nil {
 		return schemas.ValidatorPerformanceMetrics{}, err
@@ -328,7 +332,8 @@ func (p *BeaconState) GetActiveIndexes(
 func (p *BeaconState) GetValidatorsWithLessBalance(
 	activeValidatorIndexes []uint64,
 	prevBeaconState *spec.VersionedBeaconState,
-	currentBeaconState *spec.VersionedBeaconState) ([]uint64, *big.Int, *big.Int, error) {
+	currentBeaconState *spec.VersionedBeaconState,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) ([]uint64, *big.Int, *big.Int, error) {
 
 	prevEpoch := GetSlot(prevBeaconState) / p.networkParameters.slotsInEpoch
 	currEpoch := GetSlot(currentBeaconState) / p.networkParameters.slotsInEpoch
@@ -355,9 +360,16 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 
 		prevEpochValBalance := big.NewInt(0).SetUint64(prevBalances[valIdx])
 		currentEpochValBalance := big.NewInt(0).SetUint64(currBalances[valIdx])
+		if valWithdrawalAmount, ok := validatorIndexToWithdrawalAmount[valIdx]; ok {
+			log.Warn(fmt.Sprintf("Validator index: %d has withdrawal amount: %d", valIdx, valWithdrawalAmount))
+			currentEpochValBalance.Add(currentEpochValBalance, valWithdrawalAmount)
+		}
 		delta := big.NewInt(0).Sub(currentEpochValBalance, prevEpochValBalance)
 
 		if delta.Cmp(big.NewInt(0)) == -1 {
+			log.Warn("Epoch: ", currEpoch)
+			log.Warn("validator index: ", valIdx, " has less balance: ", delta)
+			log.Warn("prev balance: ", prevEpochValBalance, " current balance: ", currentEpochValBalance)
 			indexesWithLessBalance = append(indexesWithLessBalance, valIdx)
 			lostBalance.Add(lostBalance, delta)
 		} else {
