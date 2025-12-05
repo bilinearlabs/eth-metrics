@@ -537,6 +537,8 @@ func GetValidators(beaconState *spec.VersionedBeaconState) []*phase0.Validator {
 		validators = beaconState.Deneb.Validators
 	} else if beaconState.Electra != nil {
 		validators = beaconState.Electra.Validators
+	} else if beaconState.Fulu != nil {
+		validators = beaconState.Fulu.Validators
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
@@ -555,6 +557,8 @@ func GetBalances(beaconState *spec.VersionedBeaconState) []uint64 {
 		tmpBalances = beaconState.Deneb.Balances
 	} else if beaconState.Electra != nil {
 		tmpBalances = beaconState.Electra.Balances
+	} else if beaconState.Fulu != nil {
+		tmpBalances = beaconState.Fulu.Balances
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
@@ -578,6 +582,8 @@ func GetPreviousEpochParticipation(beaconState *spec.VersionedBeaconState) []alt
 		previousEpochParticipation = beaconState.Deneb.PreviousEpochParticipation
 	} else if beaconState.Electra != nil {
 		previousEpochParticipation = beaconState.Electra.PreviousEpochParticipation
+	} else if beaconState.Fulu != nil {
+		previousEpochParticipation = beaconState.Fulu.PreviousEpochParticipation
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
@@ -596,6 +602,8 @@ func GetSlot(beaconState *spec.VersionedBeaconState) uint64 {
 		slot = uint64(beaconState.Deneb.Slot)
 	} else if beaconState.Electra != nil {
 		slot = uint64(beaconState.Electra.Slot)
+	} else if beaconState.Fulu != nil {
+		slot = uint64(beaconState.Fulu.Slot)
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
@@ -630,6 +638,8 @@ func GetCurrentSyncCommittee(beaconState *spec.VersionedBeaconState) []phase0.BL
 		pubKeys = beaconState.Deneb.CurrentSyncCommittee.Pubkeys
 	} else if beaconState.Electra != nil {
 		pubKeys = beaconState.Electra.CurrentSyncCommittee.Pubkeys
+	} else if beaconState.Fulu != nil {
+		pubKeys = beaconState.Fulu.CurrentSyncCommittee.Pubkeys
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
