@@ -620,6 +620,8 @@ func GetTimestamp(beaconState *spec.VersionedBeaconState) uint64 {
 		timestamp = uint64(beaconState.Deneb.LatestExecutionPayloadHeader.Timestamp)
 	} else if beaconState.Electra != nil {
 		timestamp = uint64(beaconState.Electra.LatestExecutionPayloadHeader.Timestamp)
+	} else if beaconState.Fulu != nil {
+		timestamp = uint64(beaconState.Fulu.LatestExecutionPayloadHeader.Timestamp)
 	} else {
 		log.Fatal("Could not get timestamp from beacon state")
 	}
