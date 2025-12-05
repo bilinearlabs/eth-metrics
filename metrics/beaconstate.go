@@ -246,7 +246,7 @@ func (p *BeaconState) GetBeaconState(epoch uint64) (*spec.VersionedBeaconState, 
 	// If epoch=1, slot = epoch*32 = 32, which is the first slot of epoch 1
 	// but we want to run the metrics on the last slot, so -1
 	// goes to the last slot of the previous epoch
-	slotStr := strconv.FormatUint(epoch*p.networkParameters.slotsInEpoch-1, 10)
+	slotStr := strconv.FormatUint((epoch+1)*p.networkParameters.slotsInEpoch-1, 10)
 
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(p.config.StateTimeout))
 	defer cancel()
