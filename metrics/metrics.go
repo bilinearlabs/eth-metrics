@@ -423,6 +423,8 @@ func GetBlockWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock) []*capell
 		withdrawals = beaconBlock.Deneb.Message.Body.ExecutionPayload.Withdrawals
 	} else if beaconBlock.Electra != nil {
 		withdrawals = beaconBlock.Electra.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Fulu != nil {
+		withdrawals = beaconBlock.Fulu.Message.Body.ExecutionPayload.Withdrawals
 	} else {
 		log.Fatal("Beacon state was empty")
 	}
