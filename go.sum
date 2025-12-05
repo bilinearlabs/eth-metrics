@@ -1,5 +1,9 @@
 github.com/attestantio/go-eth2-client v0.26.0 h1:oDWKvIUJfvr1EBi/w9L6mawYZHOCymjHkml7fZplT20=
 github.com/attestantio/go-eth2-client v0.26.0/go.mod h1:fvULSL9WtNskkOB4i+Yyr6BKpNHXvmpGZj9969fCrfY=
+github.com/attestantio/go-eth2-client v0.27.1 h1:g7bm+gG/p+gfzYdEuxuAepVWYb8EO+2KojV5/Lo2BxM=
+github.com/attestantio/go-eth2-client v0.27.1/go.mod h1:fvULSL9WtNskkOB4i+Yyr6BKpNHXvmpGZj9969fCrfY=
+github.com/attestantio/go-eth2-client v0.27.2 h1:VjA9R39ovy8ryb7IpFfD5eLYBg/20biztxh6fKZ7/K0=
+github.com/attestantio/go-eth2-client v0.27.2/go.mod h1:i56XBegxVt7wXupnLBOj9IyGwy5cqaoTsCSKlwTubEU=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bytedance/sonic v1.13.3 h1:MS8gmaH16Gtirygw7jV91pDCN33NyMrPbN7qiYhEsF0=

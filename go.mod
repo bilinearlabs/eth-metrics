@@ -1,9 +1,9 @@
 module github.com/bilinearlabs/eth-metrics
 
-go 1.24
+go 1.25
 
 require (
-	github.com/attestantio/go-eth2-client v0.26.0
+	github.com/attestantio/go-eth2-client v0.27.2
 	github.com/ethereum/go-ethereum v1.16.1
 	github.com/gin-contrib/cors v1.7.6
 	github.com/gin-gonic/gin v1.10.1
@@ -15,7 +15,6 @@ require (
 	github.com/stretchr/testify v1.10.0
 	github.com/superoo7/go-gecko v1.0.0
 	modernc.org/sqlite v1.38.0
-
 )
 
 require (
