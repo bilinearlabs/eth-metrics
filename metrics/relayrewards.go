@@ -91,7 +91,6 @@ func (r *RelayRewards) GetRelayRewards(
 					if !ok {
 						continue
 					}
-					// bigint
 					value, ok := big.NewInt(0).SetString(payload.Value, 10)
 					if !ok {
 						log.Errorf("failed to parse value: %s", payload.Value)
@@ -113,7 +112,23 @@ func (r *RelayRewards) GetRelayRewards(
 }
 
 func (r *RelayRewards) getRewards(relayServer string, slot uint64) ([]common.BidTraceV2JSON, error) {
-	resp, err := r.httpClient.Get(fmt.Sprintf("%s/relay/v1/data/bidtraces/proposer_payload_delivered?slot=%d", relayServer, slot))
+	var resp *http.Response
+	var err error
+
+	maxRetries := 5
+	backoff := 250 * time.Millisecond
+	for attempt := range maxRetries {
+		resp, err = r.httpClient.Get(fmt.Sprintf("%s/relay/v1/data/bidtraces/proposer_payload_delivered?slot=%d", relayServer, slot))
+		if err == nil && resp.StatusCode < 500 {
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		log.Warnf("error getting rewards from %s: %s. Retrying... (%d/%d)", relayServer, err, attempt+1, maxRetries)
+		time.Sleep(backoff)
+		backoff *= 2
+	}
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting rewards")
 	}
