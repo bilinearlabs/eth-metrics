@@ -361,15 +361,11 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 		prevEpochValBalance := big.NewInt(0).SetUint64(prevBalances[valIdx])
 		currentEpochValBalance := big.NewInt(0).SetUint64(currBalances[valIdx])
 		if valWithdrawalAmount, ok := validatorIndexToWithdrawalAmount[valIdx]; ok {
-			log.Warn(fmt.Sprintf("Validator index: %d has withdrawal amount: %d", valIdx, valWithdrawalAmount))
 			currentEpochValBalance.Add(currentEpochValBalance, valWithdrawalAmount)
 		}
 		delta := big.NewInt(0).Sub(currentEpochValBalance, prevEpochValBalance)
 
 		if delta.Cmp(big.NewInt(0)) == -1 {
-			log.Warn("Epoch: ", currEpoch)
-			log.Warn("validator index: ", valIdx, " has less balance: ", delta)
-			log.Warn("prev balance: ", prevEpochValBalance, " current balance: ", currentEpochValBalance)
 			indexesWithLessBalance = append(indexesWithLessBalance, valIdx)
 			lostBalance.Add(lostBalance, delta)
 		} else {
