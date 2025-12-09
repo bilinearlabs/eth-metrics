@@ -396,6 +396,10 @@ func (a *Metrics) GetEpochWithdrawals(epoch uint64) (map[uint64]*big.Int, error)
 			&opts,
 		)
 		if err != nil {
+			// This error is expected in skipped or orphaned blocks
+			if !strings.Contains(err.Error(), "NOT_FOUND") {
+				return nil, errors.Wrap(err, "error getting signed beacon block")
+			}
 			log.Warn("block not found for slot: ", slot)
 			continue
 		}
