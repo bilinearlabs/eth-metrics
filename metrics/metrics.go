@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"encoding/base64"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
+	"github.com/attestantio/go-eth2-client/spec/capella"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/rs/zerolog"
 
 	"github.com/bilinearlabs/eth-metrics/config"
@@ -28,12 +31,15 @@ type NetworkParameters struct {
 }
 
 type Metrics struct {
-	networkParameters *NetworkParameters
-	config            *config.Config
-	db                *db.Database
-	httpClient        *http.Service
-	beaconState       *BeaconState
-	proposalDuties    *ProposalDuties
+	networkParameters    *NetworkParameters
+	config               *config.Config
+	db                   *db.Database
+	httpClient           *http.Service
+	validatorKeysPerPool map[string][][]byte
+	validatorKeyToPool   map[string]string
+	beaconState          *BeaconState
+	proposalDuties       *ProposalDuties
+	relayRewards         *RelayRewards
 }
 
 func NewMetrics(
@@ -54,13 +60,31 @@ func NewMetrics(
 		}
 	}
 
-	for _, poolName := range config.PoolNames {
-		if strings.HasSuffix(poolName, ".txt") {
-			pubKeysDeposited, err := pools.ReadCustomValidatorsFile(poolName)
-			if err != nil {
-				log.Fatal(err)
+	var validatorKeysPerPool map[string][][]byte
+	var validatorKeyToPool map[string]string
+
+	if config.ValidatorsFile != "" {
+		validatorKeysPerPool, validatorKeyToPool, err = pools.ReadValidatorsFile(config.ValidatorsFile)
+		if err != nil {
+			return nil, errors.Wrap(err, "error reading validators file")
+		}
+	} else {
+		// TODO check if mantain reading from txt files
+		validatorKeysPerPool = make(map[string][][]byte)
+		validatorKeyToPool = make(map[string]string)
+		for _, poolName := range config.PoolNames {
+			if strings.HasSuffix(poolName, ".txt") {
+				pubKeysDeposited, err := pools.ReadCustomValidatorsFile(poolName)
+				if err != nil {
+					log.Fatal(err)
+				}
+				validatorKeysPerPool[poolName] = pubKeysDeposited
+				for _, key := range pubKeysDeposited {
+					keyStr := hexutil.Encode(key)
+					validatorKeyToPool[keyStr] = poolName
+				}
+				log.Info("File: ", poolName, " contains ", len(pubKeysDeposited), " keys")
 			}
-			log.Info("File: ", poolName, " contains ", len(pubKeysDeposited), " keys")
 		}
 	}
 
@@ -118,10 +142,12 @@ func NewMetrics(
 	}
 
 	return &Metrics{
-		networkParameters: networkParameters,
-		db:                database,
-		httpClient:        httpClient,
-		config:            config,
+		networkParameters:    networkParameters,
+		db:                   database,
+		httpClient:           httpClient,
+		config:               config,
+		validatorKeysPerPool: validatorKeysPerPool,
+		validatorKeyToPool:   validatorKeyToPool,
 	}, nil
 }
 
@@ -150,6 +176,12 @@ func (a *Metrics) Run() {
 		log.Fatal(err)
 	}
 	a.proposalDuties = pd
+
+	rr, err := NewRelayRewards(a.networkParameters, a.validatorKeyToPool, a.config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	a.relayRewards = rr
 
 	for _, poolName := range a.config.PoolNames {
 		// Check that the validator keys are correct
@@ -292,17 +324,25 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
-	// Iterate all pools and calculate metrics using the fetched data
-	for _, poolName := range a.config.PoolNames {
-		poolName, pubKeys, err := a.GetValidatorKeys(poolName)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting validator keys")
-		}
+	relayRewardsPerPool, err := a.relayRewards.GetRelayRewards(currentEpoch)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting relay rewards")
+	}
 
+	// Get withdrawals from all blocks of the epoch
+	validatorIndexToWithdrawalAmount, err := a.GetEpochWithdrawals(currentEpoch)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting epoch withdrawals")
+	}
+	// Iterate all pools and calculate metrics using the fetched data
+	for poolName, pubKeys := range a.validatorKeysPerPool {
 		validatorIndexes := GetIndexesFromKeys(pubKeys, valKeyToIndex)
 
-		// TODO Rename this
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex)
+		relayRewards := big.NewInt(0)
+		if reward, ok := relayRewardsPerPool[poolName]; ok {
+			relayRewards.Add(relayRewards, reward)
+		}
+		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}
@@ -340,4 +380,57 @@ func (a *Metrics) GetValidatorKeys(poolName string) (string, [][]byte, error) {
 
 	}
 	return poolName, pubKeysDeposited, nil
+}
+
+func (a *Metrics) GetEpochWithdrawals(epoch uint64) (map[uint64]*big.Int, error) {
+	validatorIndexToWithdrawalAmount := make(map[uint64]*big.Int)
+	firstSlot := epoch * a.networkParameters.slotsInEpoch
+	for slot := firstSlot; slot < firstSlot+a.networkParameters.slotsInEpoch; slot++ {
+		slotStr := strconv.FormatUint(slot, 10)
+		opts := api.SignedBeaconBlockOpts{
+			Block: slotStr,
+		}
+
+		beaconBlock, err := a.httpClient.SignedBeaconBlock(
+			context.Background(),
+			&opts,
+		)
+		if err != nil {
+			// This error is expected in skipped or orphaned blocks
+			if !strings.Contains(err.Error(), "NOT_FOUND") {
+				return nil, errors.Wrap(err, "error getting signed beacon block")
+			}
+			log.Warn("block not found for slot: ", slot)
+			continue
+		}
+		withdrawals := GetBlockWithdrawals(beaconBlock.Data)
+
+		for _, withdrawal := range withdrawals {
+			if _, ok := validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)]; !ok {
+				validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)] = big.NewInt(0)
+			}
+			validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)].Add(validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)], big.NewInt(int64(withdrawal.Amount)))
+		}
+	}
+	return validatorIndexToWithdrawalAmount, nil
+}
+
+func GetBlockWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock) []*capella.Withdrawal {
+	var withdrawals []*capella.Withdrawal
+	if beaconBlock.Altair != nil {
+		withdrawals = []*capella.Withdrawal{}
+	} else if beaconBlock.Bellatrix != nil {
+		withdrawals = []*capella.Withdrawal{}
+	} else if beaconBlock.Capella != nil {
+		withdrawals = beaconBlock.Capella.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Deneb != nil {
+		withdrawals = beaconBlock.Deneb.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Electra != nil {
+		withdrawals = beaconBlock.Electra.Message.Body.ExecutionPayload.Withdrawals
+	} else if beaconBlock.Fulu != nil {
+		withdrawals = beaconBlock.Fulu.Message.Body.ExecutionPayload.Withdrawals
+	} else {
+		log.Fatal("Beacon state was empty")
+	}
+	return withdrawals
 }

@@ -3,6 +3,7 @@ package db
 import (
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/bilinearlabs/eth-metrics/schemas"
 	"github.com/stretchr/testify/require"
@@ -15,9 +16,11 @@ func Test_GetMissingEpochs(t *testing.T) {
 	db.CreateTables()
 
 	db.StoreValidatorPerformance(schemas.ValidatorPerformanceMetrics{
+		Time:          time.Now(),
 		Epoch:         100,
 		EarnedBalance: big.NewInt(100),
 		LosedBalance:  big.NewInt(100),
+		MEVRewards:    big.NewInt(100),
 	})
 
 	epochs, err := db.GetMissingEpochs(200, 4)
@@ -25,9 +28,11 @@ func Test_GetMissingEpochs(t *testing.T) {
 	require.Equal(t, []uint64{197, 198, 199, 200}, epochs)
 
 	db.StoreValidatorPerformance(schemas.ValidatorPerformanceMetrics{
+		Time:          time.Now(),
 		Epoch:         197,
 		EarnedBalance: big.NewInt(100),
 		LosedBalance:  big.NewInt(100),
+		MEVRewards:    big.NewInt(100),
 	})
 
 	epochs, err = db.GetMissingEpochs(200, 4)

@@ -52,7 +52,9 @@ func (p *BeaconState) Run(
 	poolName string,
 	currentBeaconState *spec.VersionedBeaconState,
 	prevBeaconState *spec.VersionedBeaconState,
-	valKeyToIndex map[string]uint64) error {
+	valKeyToIndex map[string]uint64,
+	relayRewards *big.Int,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) error {
 
 	if currentBeaconState == nil || prevBeaconState == nil {
 		return errors.New("current or previous beacon state is nil")
@@ -85,11 +87,14 @@ func (p *BeaconState) Run(
 		poolName,
 		activeValidatorIndexes,
 		currentBeaconState,
-		prevBeaconState)
+		prevBeaconState,
+		validatorIndexToWithdrawalAmount)
 
 	if err != nil {
 		return errors.Wrap(err, "error populating participation and balance")
 	}
+
+	metrics.MEVRewards = relayRewards
 
 	syncCommitteeKeys := BLSPubKeyToByte(GetCurrentSyncCommittee(currentBeaconState))
 	syncCommitteeIndexes := GetIndexesFromKeys(syncCommitteeKeys, valKeyToIndex)
@@ -166,7 +171,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	poolName string,
 	activeValidatorIndexes []uint64,
 	beaconState *spec.VersionedBeaconState,
-	prevBeaconState *spec.VersionedBeaconState) (schemas.ValidatorPerformanceMetrics, error) {
+	prevBeaconState *spec.VersionedBeaconState,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) (schemas.ValidatorPerformanceMetrics, error) {
 
 	metrics := schemas.ValidatorPerformanceMetrics{
 		EarnedBalance:    big.NewInt(0),
@@ -184,9 +190,11 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	prevBalance, prevEffectiveBalance := GetTotalBalanceAndEffective(activeValidatorIndexes, prevBeaconState)
 
 	// Make sure we are comparing apples to apples
-	if currentEffectiveBalance.Cmp(prevEffectiveBalance) != 0 {
+	effectiveBalanceDiff := new(big.Int).Sub(currentEffectiveBalance, prevEffectiveBalance)
+	effectiveBalanceDiff.Abs(effectiveBalanceDiff)
+	if effectiveBalanceDiff.Cmp(big.NewInt(0)) != 0 && effectiveBalanceDiff.Cmp(big.NewInt(1000000000)) < 0 { // > 0 && < 1 ETH
 		return schemas.ValidatorPerformanceMetrics{},
-			errors.New(fmt.Sprint("Can't calculate delta balances, effective balances are different:",
+			errors.New(fmt.Sprint("Can't calculate delta balances for pool: ", poolName, ", effective balances are different by less than 1 ETH:",
 				currentEffectiveBalance, " vs ", prevEffectiveBalance))
 	}
 
@@ -196,7 +204,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	lessBalanceIndexes, earnedBalance, lostBalance, err := p.GetValidatorsWithLessBalance(
 		activeValidatorIndexes,
 		prevBeaconState,
-		beaconState)
+		beaconState,
+		validatorIndexToWithdrawalAmount)
 
 	if err != nil {
 		return schemas.ValidatorPerformanceMetrics{}, err
@@ -237,12 +246,16 @@ func (p *BeaconState) GetBeaconState(epoch uint64) (*spec.VersionedBeaconState, 
 	// If epoch=1, slot = epoch*32 = 32, which is the first slot of epoch 1
 	// but we want to run the metrics on the last slot, so -1
 	// goes to the last slot of the previous epoch
-	slotStr := strconv.FormatUint(epoch*p.networkParameters.slotsInEpoch-1, 10)
+	slotStr := strconv.FormatUint((epoch+1)*p.networkParameters.slotsInEpoch-1, 10)
 
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), time.Second*time.Duration(p.config.StateTimeout))
 	defer cancel()
 	opts := api.BeaconStateOpts{
 		State: slotStr,
+		// Override http client timeout
+		Common: api.CommonOpts{
+			Timeout: time.Second * time.Duration(p.config.StateTimeout),
+		},
 	}
 	beaconState, err := p.consensus.BeaconState(
 		ctxTimeout,
@@ -319,7 +332,8 @@ func (p *BeaconState) GetActiveIndexes(
 func (p *BeaconState) GetValidatorsWithLessBalance(
 	activeValidatorIndexes []uint64,
 	prevBeaconState *spec.VersionedBeaconState,
-	currentBeaconState *spec.VersionedBeaconState) ([]uint64, *big.Int, *big.Int, error) {
+	currentBeaconState *spec.VersionedBeaconState,
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int) ([]uint64, *big.Int, *big.Int, error) {
 
 	prevEpoch := GetSlot(prevBeaconState) / p.networkParameters.slotsInEpoch
 	currEpoch := GetSlot(currentBeaconState) / p.networkParameters.slotsInEpoch
@@ -346,6 +360,9 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 
 		prevEpochValBalance := big.NewInt(0).SetUint64(prevBalances[valIdx])
 		currentEpochValBalance := big.NewInt(0).SetUint64(currBalances[valIdx])
+		if valWithdrawalAmount, ok := validatorIndexToWithdrawalAmount[valIdx]; ok {
+			currentEpochValBalance.Add(currentEpochValBalance, valWithdrawalAmount)
+		}
 		delta := big.NewInt(0).Sub(currentEpochValBalance, prevEpochValBalance)
 
 		if delta.Cmp(big.NewInt(0)) == -1 {
@@ -495,6 +512,7 @@ func logMetrics(
 		"ValidadorKeyMissedAtt":       metrics.IndexesMissedAtt,
 		"ValidadorKeyLessBalance":     metrics.IndexesLessBalance,
 		"DeltaEpochBalance":           metrics.DeltaEpochBalance,
+		"epochMEVRewards":             metrics.MEVRewards,
 	}).Info(poolName + " Stats:")
 }
 

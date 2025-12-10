@@ -98,3 +98,55 @@ func ReadEthstaValidatorsFile(validatorKeysFile string) (validatorKeys [][]byte,
 	log.Info("Done reading ", len(validatorKeys), " from ", validatorKeysFile)
 	return validatorKeys, nil
 }
+
+func ReadValidatorsFile(validatorsFile string) (poolValidatorKeys map[string][][]byte, validatorKeyToPool map[string]string, err error) {
+	log.Info("Reading validators csv file: ", validatorsFile)
+	poolValidatorKeys = make(map[string][][]byte)
+	validatorKeyToPool = make(map[string]string)
+
+	file, err := os.Open(validatorsFile)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer file.Close()
+
+	numKeys := 0
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Skip first line
+		if line == "Validator Index,Public Key,Entity (Pool Name),Sub-Pool" {
+			continue
+		}
+		fields := strings.Split(line, ",")
+		if len(fields) != 4 {
+			return poolValidatorKeys, validatorKeyToPool, errors.New("the format of the file is not the expected: Validator Index,Public Key,Entity (Pool Name),Sub-Pool")
+		}
+		entity := fields[2]
+		keyStr := fields[1]
+
+		if !strings.HasPrefix(keyStr, "0x") {
+			keyStr = "0x" + keyStr
+		}
+		if len(keyStr) != 98 {
+			return poolValidatorKeys, validatorKeyToPool, errors.New(fmt.Sprintf("length of key is incorrect: %d", len(keyStr)))
+		}
+		valKey, err := hexutil.Decode(keyStr)
+		if err != nil {
+			return poolValidatorKeys, validatorKeyToPool, errors.Wrap(err, fmt.Sprintf("could not decode key: %s", keyStr))
+		}
+		if _, ok := poolValidatorKeys[entity]; !ok {
+			poolValidatorKeys[entity] = make([][]byte, 0)
+		}
+		poolValidatorKeys[entity] = append(poolValidatorKeys[entity], valKey)
+		validatorKeyToPool[keyStr] = entity
+		numKeys++
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	log.Info("Done reading ", numKeys, " keys from ", validatorsFile)
+	return poolValidatorKeys, validatorKeyToPool, nil
+}

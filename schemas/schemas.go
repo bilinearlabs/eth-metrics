@@ -25,6 +25,7 @@ type ValidatorPerformanceMetrics struct {
 	EffectiveBalance       *big.Int
 	TotalRewards           *big.Int
 	DeltaEpochBalance      *big.Int
+	MEVRewards             *big.Int
 }
 
 type ValidatorStatusMetrics struct {
