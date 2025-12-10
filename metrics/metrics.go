@@ -184,7 +184,7 @@ func (a *Metrics) Run() {
 	}
 	a.relayRewards = rr
 
-	ns, err := NewNetworkStats(a.httpClient, a.networkParameters, a.db, a.config)
+	ns, err := NewNetworkStats(a.db)
 	if err != nil {
 		log.Fatal(err)
 	}

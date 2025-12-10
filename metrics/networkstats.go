@@ -20,15 +20,10 @@ type NetworkStats struct {
 }
 
 func NewNetworkStats(
-	consensus *http.Service,
-	networkParameters *NetworkParameters,
 	database *db.Database,
-	config *config.Config) (*NetworkStats, error) {
+) (*NetworkStats, error) {
 	return &NetworkStats{
-		consensus:         consensus,
-		networkParameters: networkParameters,
-		database:          database,
-		config:            config,
+		database: database,
 	}, nil
 }
 
