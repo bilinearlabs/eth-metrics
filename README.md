@@ -83,11 +83,12 @@ This example will monitor the performance of `pool_a` and `pool_b` and store in 
 --pool-name=pool_b.txt \
 ```
 
-Another option is to place in	`pools.csv` file the validators keys you want to track.
+Another option is to place in a `pools.csv` file the validators you want to track. The file must be a CSV with 4 columns: `Validator Index`, `Public Key`, `Entity (Pool Name)`, and `Sub-Pool`. The first line (header) is skipped if it matches the expected format. Only `Public Key` and `Entity (Pool Name)` fields are used at the moment.
 
 ```csv
-pool_a,0xaddc693f9090db30a9aae27c047a95245f60313f574fb32729dd06341db55c743e64ba0709ee74181750b6da5f234b44
-pool_b,0xa59af0999c83f66de6cab8d833169fe10bce102d466c60c97c4e927210ac56e687c53feac8937c905cec5e87fccd72ce
+Validator Index,Public Key,Entity (Pool Name),Sub-Pool
+123456,0xaddc693f9090db30a9aae27c047a95245f60313f574fb32729dd06341db55c743e64ba0709ee74181750b6da5f234b44,pool_a,subpool1
+789012,0xa59af0999c83f66de6cab8d833169fe10bce102d466c60c97c4e927210ac56e687c53feac8937c905cec5e87fccd72ce,pool_b,subpool2
 ```
 
 And pass the `--validators-file` flag:

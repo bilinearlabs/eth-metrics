@@ -13,6 +13,7 @@ import (
 	"github.com/flashbots/mev-boost-relay/common"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 var RELAY_SERVERS = []string{
@@ -55,37 +56,31 @@ func (r *RelayRewards) GetRelayRewards(
 	results := make(chan struct {
 		pool   string
 		reward *big.Int
-	}, len(RELAY_SERVERS)*int(slotsInEpoch))
-	var wg sync.WaitGroup
+	})
+	var g errgroup.Group
 	var consumerWg sync.WaitGroup
 
 	// Consumer
-	consumerWg.Add(1)
-	go func() {
-		defer consumerWg.Done()
+	consumerWg.Go(func() {
 		for result := range results {
 			if _, ok := poolRewards[result.pool]; !ok {
 				poolRewards[result.pool] = big.NewInt(0)
 			}
 			poolRewards[result.pool] = new(big.Int).Add(poolRewards[result.pool], result.reward)
 		}
-	}()
+	})
 
 	for i := range slotsInEpoch {
 		// Wait to avoid rate limiting
 		time.Sleep(250 * time.Millisecond)
 		slot := epoch*slotsInEpoch + i
 		for _, relayServer := range RELAY_SERVERS {
-			wg.Add(1)
-			go func(relayServer string, slot uint64) {
-				defer wg.Done()
-				payloads, err := r.getRewards(relayServer, slot)
-
+			relay := relayServer
+			g.Go(func() error {
+				payloads, err := r.getRewards(relay, slot)
 				if err != nil {
-					log.Errorf("error getting rewards from %s: %s", relayServer, err)
-					return
+					return errors.Wrap(err, fmt.Sprintf("error getting rewards from %s", relay))
 				}
-
 				for _, payload := range payloads {
 					pool, ok := r.validatorKeyToPool[payload.ProposerPubkey]
 					if !ok {
@@ -93,18 +88,22 @@ func (r *RelayRewards) GetRelayRewards(
 					}
 					value, ok := big.NewInt(0).SetString(payload.Value, 10)
 					if !ok {
-						log.Errorf("failed to parse value: %s", payload.Value)
-						continue
+						return errors.New(fmt.Sprintf("failed to parse value: %s", payload.Value))
 					}
 					results <- struct {
 						pool   string
 						reward *big.Int
 					}{pool, value}
 				}
-			}(relayServer, slot)
+				return nil
+			})
 		}
 	}
-	wg.Wait()
+	if err := g.Wait(); err != nil {
+		close(results)
+		consumerWg.Wait()
+		return nil, errors.Wrap(err, "error getting rewards")
+	}
 	close(results)
 	consumerWg.Wait()
 

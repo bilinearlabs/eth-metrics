@@ -82,7 +82,31 @@ func TestGetRelayRewards_HTTPError(t *testing.T) {
 	assert.NoError(t, err)
 
 	rewards, err := relayRewards.GetRelayRewards(0)
+	assert.Error(t, err)
+	assert.Nil(t, rewards)
+}
+
+func TestGetRelayRewards_InvalidValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`[{"proposer_pubkey": "0x1234567890abcdef", "value": "Invalid Value"}]`))
+	}))
+	defer server.Close()
+
+	RELAY_SERVERS = []string{server.URL}
+
+	networkParams := &NetworkParameters{
+		slotsInEpoch: 1,
+	}
+	validatorKeyToPool := map[string]string{
+		"0x1234567890abcdef": "pool1",
+	}
+	cfg := &config.Config{}
+
+	relayRewards, err := NewRelayRewards(networkParams, validatorKeyToPool, cfg)
 	assert.NoError(t, err)
-	assert.NotNil(t, rewards)
-	assert.Equal(t, (*big.Int)(nil), rewards["pool1"])
+
+	rewards, err := relayRewards.GetRelayRewards(0)
+	assert.Error(t, err)
+	assert.Nil(t, rewards)
 }
