@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS t_pools_metrics_summary (
 	 f_pool TEXT,
 	 f_epoch_timestamp TIMESTAMPTZ NOT NULL,
 
+	 f_n_active_validators BIGINT,
 	 f_n_total_votes BIGINT,
 	 f_n_incorrect_source BIGINT,
 	 f_n_incorrect_target BIGINT,
@@ -56,6 +57,17 @@ CREATE TABLE IF NOT EXISTS t_eth_price (
 );
 `
 
+var createNetworkStatsTable = `
+CREATE TABLE IF NOT EXISTS t_network_stats (
+	 f_timestamp TIMESTAMPTZ NOT NULL,
+	 f_epoch BIGINT,
+	 f_n_active_validators BIGINT,
+	 f_n_exited_validators BIGINT,
+	 f_n_slashed_validators BIGINT,
+	 PRIMARY KEY (f_epoch)
+);
+`
+
 var insertEthPrice = `
 INSERT INTO t_eth_price(
 	f_timestamp,
@@ -75,6 +87,7 @@ INSERT INTO t_pools_metrics_summary(
 	f_epoch,
 	f_pool,
 	f_epoch_timestamp,
+	f_n_active_validators,
 	f_n_total_votes,
 	f_n_incorrect_source,
 	f_n_incorrect_target,
@@ -86,11 +99,12 @@ INSERT INTO t_pools_metrics_summary(
 	f_epoch_earned_balance_gwei,
 	f_epoch_lost_balace_gwei,
 	f_mev_rewards_wei)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
    f_timestamp=EXCLUDED.f_timestamp,
    f_epoch_timestamp=EXCLUDED.f_epoch_timestamp,
+   f_n_active_validators=EXCLUDED.f_n_active_validators,
    f_n_total_votes=EXCLUDED.f_n_total_votes,
 	 f_n_incorrect_source=EXCLUDED.f_n_incorrect_source,
 	 f_n_incorrect_target=EXCLUDED.f_n_incorrect_target,
@@ -116,6 +130,22 @@ ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
    f_n_scheduled_blocks=EXCLUDED.f_n_scheduled_blocks,
    f_n_proposed_blocks=EXCLUDED.f_n_proposed_blocks
+`
+
+var insertNetworkStats = `
+INSERT INTO t_network_stats(
+	f_timestamp,
+	f_epoch,
+	f_n_active_validators,
+	f_n_exited_validators,
+	f_n_slashed_validators)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (f_epoch)
+DO UPDATE SET
+   f_timestamp=EXCLUDED.f_timestamp,
+   f_n_active_validators=EXCLUDED.f_n_active_validators,
+   f_n_exited_validators=EXCLUDED.f_n_exited_validators,
+   f_n_slashed_validators=EXCLUDED.f_n_slashed_validators
 `
 
 type Database struct {
@@ -144,6 +174,12 @@ func (a *Database) CreateTables() error {
 	if _, err := a.db.ExecContext(
 		context.Background(),
 		createProposalDutiesTable); err != nil {
+		return err
+	}
+
+	if _, err := a.db.ExecContext(
+		context.Background(),
+		createNetworkStatsTable); err != nil {
 		return err
 	}
 
@@ -182,6 +218,7 @@ func (a *Database) StoreValidatorPerformance(validatorPerformance schemas.Valida
 		validatorPerformance.Epoch,
 		validatorPerformance.PoolName,
 		validatorPerformance.Time,
+		validatorPerformance.NOfActiveValidators,
 		validatorPerformance.NOfTotalVotes,
 		validatorPerformance.NOfIncorrectSource,
 		validatorPerformance.NOfIncorrectTarget,
@@ -213,6 +250,23 @@ func (a *Database) StoreEthPrice(ethPriceUsd float32) error {
 		insertEthPrice,
 		time.Now(), // not really correct
 		ethPriceUsd)
+
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *Database) StoreNetworkMetrics(networkMetrics schemas.NetworkStats) error {
+	_, err := a.db.ExecContext(
+		context.Background(),
+		insertNetworkStats,
+		networkMetrics.Time,
+		networkMetrics.Epoch,
+		networkMetrics.NOfActiveValidators,
+		networkMetrics.NOfExitedValidators,
+		networkMetrics.NOfSlashedValidators,
+	)
 
 	if err != nil {
 		return err

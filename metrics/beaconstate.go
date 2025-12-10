@@ -94,6 +94,7 @@ func (p *BeaconState) Run(
 		return errors.Wrap(err, "error populating participation and balance")
 	}
 
+	metrics.NOfActiveValidators = uint64(len(activeValidatorIndexes))
 	metrics.MEVRewards = relayRewards
 
 	syncCommitteeKeys := BLSPubKeyToByte(GetCurrentSyncCommittee(currentBeaconState))
@@ -102,9 +103,6 @@ func (p *BeaconState) Run(
 
 	// Temporal to debug:
 	p.ParticipationDebug(activeValidatorIndexes, currentBeaconState)
-
-	// TODO: Move network stats out
-	Slashings(currentBeaconState)
 
 	log.Info("The pool:", poolName, " contains ", len(validatorKeys), " keys (may be hardcoded)")
 	log.Info("The pool:", poolName, " contains ", len(validatorIndexes), " validators detected in the beacon state")
@@ -419,25 +417,6 @@ func (p *BeaconState) ParticipationDebug(
 	log.Info("Correct Head: ", (float64(nCorrectHead) / float64(nActiveValidators) * 100))
 }
 
-func Slashings(beaconState *spec.VersionedBeaconState) {
-	nOfSlashedValidators := 0
-	validators := GetValidators(beaconState)
-
-	// Create a map to convert from key to index for quick access
-	//valKeyToIndex := PopulateKeysToIndexesMap(beaconState)
-
-	for _, val := range validators {
-		if val.Slashed {
-			nOfSlashedValidators++
-		}
-	}
-
-	log.WithFields(log.Fields{
-		"Total Validators":         len(validators),
-		"Total Slashed Validators": nOfSlashedValidators,
-	}).Info("Network stats:")
-}
-
 // See spec: from LSB to MSB: source, target, head.
 // https://github.com/ethereum/consensus-specs/blob/master/specs/altair/beacon-chain.md#participation-flag-indices
 func (p *BeaconState) GetParticipation(
@@ -494,6 +473,7 @@ func logMetrics(
 	log.WithFields(log.Fields{
 		"PoolName":                    poolName,
 		"Epoch":                       metrics.Epoch,
+		"nOfActiveValidators":         metrics.NOfActiveValidators,
 		"nOfTotalVotes":               metrics.NOfTotalVotes,
 		"nOfIncorrectSource":          metrics.NOfIncorrectSource,
 		"nOfIncorrectTarget":          metrics.NOfIncorrectTarget,
