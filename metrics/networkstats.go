@@ -31,6 +31,10 @@ func (n *NetworkStats) Run(
 	currentEpoch uint64,
 	currentBeaconState *spec.VersionedBeaconState,
 ) error {
+	if n.database == nil {
+		return errors.New("database is nil")
+	}
+
 	if currentBeaconState == nil {
 		return errors.New("current beacon state is nil")
 	}
