@@ -9,6 +9,7 @@ type ValidatorPerformanceMetrics struct {
 	Time                   time.Time
 	PoolName               string
 	Epoch                  uint64
+	NOfActiveValidators    uint64
 	NOfTotalVotes          uint64
 	NOfIncorrectSource     uint64
 	NOfIncorrectTarget     uint64
@@ -64,4 +65,12 @@ type Duty struct {
 	ValIndex uint64
 	Slot     uint64
 	Graffiti string
+}
+
+type NetworkStats struct {
+	Time                 time.Time
+	Epoch                uint64
+	NOfActiveValidators  uint64
+	NOfExitedValidators  uint64
+	NOfSlashedValidators uint64
 }

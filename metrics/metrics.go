@@ -40,6 +40,7 @@ type Metrics struct {
 	beaconState          *BeaconState
 	proposalDuties       *ProposalDuties
 	relayRewards         *RelayRewards
+	networkStats         *NetworkStats
 }
 
 func NewMetrics(
@@ -182,6 +183,12 @@ func (a *Metrics) Run() {
 		log.Fatal(err)
 	}
 	a.relayRewards = rr
+
+	ns, err := NewNetworkStats(a.db)
+	if err != nil {
+		log.Fatal(err)
+	}
+	a.networkStats = ns
 
 	for _, poolName := range a.config.PoolNames {
 		// Check that the validator keys are correct
@@ -334,6 +341,12 @@ func (a *Metrics) ProcessEpoch(
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting epoch withdrawals")
 	}
+
+	err = a.networkStats.Run(currentEpoch, currentBeaconState)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting network stats")
+	}
+
 	// Iterate all pools and calculate metrics using the fetched data
 	for poolName, pubKeys := range a.validatorKeysPerPool {
 		validatorIndexes := GetIndexesFromKeys(pubKeys, valKeyToIndex)
