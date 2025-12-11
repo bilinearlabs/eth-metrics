@@ -3,9 +3,7 @@ package metrics
 import (
 	"time"
 
-	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
-	"github.com/bilinearlabs/eth-metrics/config"
 	"github.com/bilinearlabs/eth-metrics/db"
 	"github.com/bilinearlabs/eth-metrics/schemas"
 	"github.com/pkg/errors"
@@ -13,10 +11,7 @@ import (
 )
 
 type NetworkStats struct {
-	consensus         *http.Service
-	networkParameters *NetworkParameters
-	database          *db.Database
-	config            *config.Config
+	database *db.Database
 }
 
 func NewNetworkStats(
