@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS build
+FROM golang:1.25-alpine AS build
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ RUN apk add --update gcc g++
 RUN go mod download
 RUN go build -o /eth-metrics
 
-FROM golang:1.24-alpine
+FROM golang:1.25-alpine
 
 WORKDIR /
 
