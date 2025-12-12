@@ -54,7 +54,8 @@ func (p *BeaconState) Run(
 	prevBeaconState *spec.VersionedBeaconState,
 	valKeyToIndex map[string]uint64,
 	relayRewards *big.Int,
-	validatorIndexToWithdrawalAmount map[uint64]*big.Int) error {
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int,
+	proposerTips map[uint64]*big.Int) error {
 
 	if currentBeaconState == nil || prevBeaconState == nil {
 		return errors.New("current or previous beacon state is nil")
@@ -96,6 +97,12 @@ func (p *BeaconState) Run(
 
 	metrics.NOfActiveValidators = uint64(len(activeValidatorIndexes))
 	metrics.MEVRewards = relayRewards
+
+	aggregatedProposerTips := big.NewInt(0)
+	for _, activeValidatorIndex := range activeValidatorIndexes {
+		aggregatedProposerTips.Add(aggregatedProposerTips, proposerTips[activeValidatorIndex])
+	}
+	metrics.ProposerTips = aggregatedProposerTips
 
 	syncCommitteeKeys := BLSPubKeyToByte(GetCurrentSyncCommittee(currentBeaconState))
 	syncCommitteeIndexes := GetIndexesFromKeys(syncCommitteeKeys, valKeyToIndex)

@@ -10,11 +10,14 @@ import (
 	"strings"
 	"time"
 
+	nethttp "net/http"
+
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/rs/zerolog"
 
 	"github.com/bilinearlabs/eth-metrics/config"
@@ -138,10 +141,20 @@ func NewMetrics(
 	log.Info("Slots per epoch: ", slotsPerEpoch)
 	log.Info("Seconds per slot: ", secondsPerSlot)
 
-	executionClient, err := ethclient.Dial(config.Eth1Address)
+	rcpClient, err := rpc.DialOptions(
+		context.Background(),
+		config.Eth1Address,
+		rpc.WithHTTPAuth(func(h nethttp.Header) error {
+			h.Set("Authorization", "Basic "+encodedCredentials)
+			return nil
+		}),
+		rpc.WithHTTPClient(&nethttp.Client{Timeout: 60 * time.Second}),
+	)
 	if err != nil {
 		return nil, errors.Wrap(err, "error dialing execution client")
 	}
+
+	executionClient := ethclient.NewClient(rcpClient)
 
 	networkParameters := &NetworkParameters{
 		genesisSeconds: uint64(genesis.Data.GenesisTime.Unix()),
@@ -351,11 +364,12 @@ func (a *Metrics) ProcessEpoch(
 	}
 
 	// Get withdrawals from all blocks of the epoch
-	blockData, err := a.blockData.GetEpochBlockData(currentEpoch)
+	epochBlockData, err := a.blockData.GetEpochBlockData(currentEpoch)
 	if err != nil {
-		return nil, errors.Wrap(err, "error getting epoch withdrawals")
+		return nil, errors.Wrap(err, "error getting epoch block data")
 	}
-	validatorIndexToWithdrawalAmount := blockData.Withdrawals
+	validatorIndexToWithdrawalAmount := epochBlockData.Withdrawals
+	proposerTips := epochBlockData.ProposerTips
 
 	err = a.networkStats.Run(currentEpoch, currentBeaconState)
 	if err != nil {
@@ -370,7 +384,7 @@ func (a *Metrics) ProcessEpoch(
 		if reward, ok := relayRewardsPerPool[poolName]; ok {
 			relayRewards.Add(relayRewards, reward)
 		}
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount)
+		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount, proposerTips)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}

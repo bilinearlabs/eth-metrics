@@ -16,12 +16,14 @@ import (
 	"github.com/bilinearlabs/eth-metrics/config"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
 
 type EpochBlockData struct {
-	Withdrawals map[uint64]*big.Int
+	Withdrawals  map[uint64]*big.Int
+	ProposerTips map[uint64]*big.Int
 }
 
 type BlockData struct {
@@ -49,7 +51,8 @@ func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
 	log.Info("Fetching block data for epoch: ", epoch)
 
 	data := &EpochBlockData{
-		Withdrawals: make(map[uint64]*big.Int),
+		Withdrawals:  make(map[uint64]*big.Int),
+		ProposerTips: make(map[uint64]*big.Int),
 	}
 
 	firstSlot := epoch * b.networkParameters.slotsInEpoch
@@ -76,12 +79,16 @@ func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
 
 		b.extractWithdrawals(block, data.Withdrawals)
 
-		// Extract transaction fees (add when needed)
+		// Extract transaction fees
 		proposerTip, err := b.GetProposerTip(block)
 		if err != nil {
 			return nil, errors.Wrap(err, "error getting proposer tip")
 		}
-		// TODO get proposer index of this block and add to data
+		proposerIndex := b.GetProposerIndex(block)
+		if _, ok := data.ProposerTips[proposerIndex]; !ok {
+			data.ProposerTips[proposerIndex] = big.NewInt(0)
+		}
+		data.ProposerTips[proposerIndex].Add(data.ProposerTips[proposerIndex], proposerTip)
 	}
 
 	return data, nil
@@ -101,7 +108,11 @@ func (b *BlockData) extractWithdrawals(beaconBlock *spec.VersionedSignedBeaconBl
 func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock) (*big.Int, error) {
 	blockNumber := b.GetBlockNumber(beaconBlock)
 	rawTxs := b.GetBlockTransactions(beaconBlock)
-	header, receipts, err := b.getBlockHeaderAndReceipts(blockNumber, rawTxs)
+	retryOpts := []retry.Option{
+		retry.Attempts(5),
+		retry.Delay(5 * time.Second),
+	}
+	header, err := b.getBlockHeader(blockNumber, retryOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting block header and receipts")
 	}
@@ -109,19 +120,24 @@ func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock)
 	baseFeePerGas := new(big.Int).SetBytes(baseFeePerGasBytes[:])
 
 	tips := big.NewInt(0)
-	for i, rawTx := range rawTxs {
-		var tx *types.Transaction
-		err = tx.UnmarshalBinary(rawTx)
+	for _, rawTx := range rawTxs {
+		println(rawTx)
+		txReceipt, err := b.getTransactionReceipt(rawTx, retryOpts)
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting block receipt")
+		}
+		var tx types.Transaction
+		err = rlp.DecodeBytes(rawTx, &tx)
 		if err != nil {
 			return nil, errors.Wrap(err, "error unmarshalling transaction")
 		}
-		if tx.Hash() != receipts[i].TxHash {
+		if tx.Hash() != txReceipt.TxHash {
 			return nil, errors.New("transaction hash mismatch")
 		}
 
 		tipFee := new(big.Int)
 		gasPrice := tx.GasPrice()
-		gasUsed := big.NewInt(int64(receipts[i].GasUsed))
+		gasUsed := big.NewInt(int64(txReceipt.GasUsed))
 
 		switch tx.Type() {
 		case 0, 1:
@@ -139,25 +155,21 @@ func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock)
 		default:
 			return nil, errors.Errorf("unknown transaction type: %d, hash: %s", tx.Type(), tx.Hash().String())
 		}
+		tips.Add(tips, tipFee)
 	}
 	burnt := new(big.Int).Mul(big.NewInt(int64(b.GetGasUsed(beaconBlock))), baseFeePerGas)
 	proposerReward := new(big.Int).Sub(tips, burnt)
 	return proposerReward, nil
 }
 
-func (b *BlockData) getBlockHeaderAndReceipts(
+func (b *BlockData) getBlockHeader(
 	blockNumber uint64,
-	rawTxs []bellatrix.Transaction,
-) (*types.Header, []*types.Receipt, error) {
-
+	retryOpts []retry.Option,
+) (*types.Header, error) {
 	var header *types.Header
 	var err error
 
 	blockNumberBig := new(big.Int).SetUint64(blockNumber)
-	retryOpts := []retry.Option{
-		retry.Attempts(5),
-		retry.Delay(5 * time.Second),
-	}
 
 	err = retry.Do(func() error {
 		header, err = b.executionClient.HeaderByNumber(context.Background(), blockNumberBig)
@@ -168,32 +180,33 @@ func (b *BlockData) getBlockHeaderAndReceipts(
 		return nil
 	}, retryOpts...)
 	if err != nil {
-		return nil, nil, errors.Wrap(err, "error getting header for block "+blockNumberBig.String())
+		return nil, errors.Wrap(err, "error getting header for block "+blockNumberBig.String())
 	}
 
-	var receipts []*types.Receipt = make([]*types.Receipt, 0)
-	for _, rawTx := range rawTxs {
-		var tx *types.Transaction
-		err = tx.UnmarshalBinary(rawTx)
+	return header, nil
+}
+
+func (b *BlockData) getTransactionReceipt(rawTx []byte, retryOpts []retry.Option) (*types.Receipt, error) {
+	var tx types.Transaction
+	err := tx.UnmarshalBinary(rawTx)
+	if err != nil {
+		return nil, errors.Wrap(err, "error unmarshalling transaction")
+	}
+	var receipt *types.Receipt
+	err = retry.Do(func() error {
+		receipt, err = b.executionClient.TransactionReceipt(context.Background(), tx.Hash())
 		if err != nil {
-			return nil, nil, errors.Wrap(err, "error unmarshalling transaction")
+			log.Warnf("error getting transaction receipt for tx %s: %s. Retrying...", tx.Hash().String(), err)
+			return errors.Wrap(err, "error getting transaction receipt")
 		}
-		var receipt *types.Receipt
-		err = retry.Do(func() error {
-			receipt, err = b.executionClient.TransactionReceipt(context.Background(), tx.Hash())
-			if err != nil {
-				log.Warnf("error getting transaction receipt for tx %s: %s. Retrying...", tx.Hash().String(), err)
-				return errors.Wrap(err, "error getting transaction receipt for block")
-			}
-			return nil
-		}, retryOpts...)
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "error getting transaction receipt for block "+blockNumberBig.String())
-		}
-		receipts = append(receipts, receipt)
+		return nil
+	}, retryOpts...)
+
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting transaction receipt for tx "+tx.Hash().String())
 	}
 
-	return header, receipts, nil
+	return receipt, nil
 }
 
 func (b *BlockData) GetBlockWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock) []*capella.Withdrawal {
@@ -303,4 +316,24 @@ func (b *BlockData) GetGasUsed(beaconBlock *spec.VersionedSignedBeaconBlock) uin
 		log.Fatal("Beacon block was empty")
 	}
 	return gasUsed
+}
+
+func (b *BlockData) GetProposerIndex(beaconBlock *spec.VersionedSignedBeaconBlock) uint64 {
+	var proposerIndex uint64
+	if beaconBlock.Altair != nil {
+		proposerIndex = uint64(beaconBlock.Altair.Message.ProposerIndex)
+	} else if beaconBlock.Bellatrix != nil {
+		proposerIndex = uint64(beaconBlock.Bellatrix.Message.ProposerIndex)
+	} else if beaconBlock.Capella != nil {
+		proposerIndex = uint64(beaconBlock.Capella.Message.ProposerIndex)
+	} else if beaconBlock.Deneb != nil {
+		proposerIndex = uint64(beaconBlock.Deneb.Message.ProposerIndex)
+	} else if beaconBlock.Electra != nil {
+		proposerIndex = uint64(beaconBlock.Electra.Message.ProposerIndex)
+	} else if beaconBlock.Fulu != nil {
+		proposerIndex = uint64(beaconBlock.Fulu.Message.ProposerIndex)
+	} else {
+		log.Fatal("Beacon block was empty")
+	}
+	return proposerIndex
 }
