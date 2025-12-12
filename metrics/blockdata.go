@@ -16,7 +16,6 @@ import (
 	"github.com/bilinearlabs/eth-metrics/config"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 )
@@ -121,13 +120,15 @@ func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock)
 
 	tips := big.NewInt(0)
 	for _, rawTx := range rawTxs {
-		println(rawTx)
-		txReceipt, err := b.getTransactionReceipt(rawTx, retryOpts)
+		var tx types.Transaction
+		err = tx.UnmarshalBinary(rawTx)
+		if err != nil {
+			return nil, errors.Wrap(err, "error unmarshalling transaction")
+		}
+		txReceipt, err := b.getTransactionReceipt(&tx, retryOpts)
 		if err != nil {
 			return nil, errors.Wrap(err, "error getting block receipt")
 		}
-		var tx types.Transaction
-		err = rlp.DecodeBytes(rawTx, &tx)
 		if err != nil {
 			return nil, errors.Wrap(err, "error unmarshalling transaction")
 		}
@@ -186,13 +187,9 @@ func (b *BlockData) getBlockHeader(
 	return header, nil
 }
 
-func (b *BlockData) getTransactionReceipt(rawTx []byte, retryOpts []retry.Option) (*types.Receipt, error) {
-	var tx types.Transaction
-	err := tx.UnmarshalBinary(rawTx)
-	if err != nil {
-		return nil, errors.Wrap(err, "error unmarshalling transaction")
-	}
+func (b *BlockData) getTransactionReceipt(tx *types.Transaction, retryOpts []retry.Option) (*types.Receipt, error) {
 	var receipt *types.Receipt
+	var err error
 	err = retry.Do(func() error {
 		receipt, err = b.executionClient.TransactionReceipt(context.Background(), tx.Hash())
 		if err != nil {
