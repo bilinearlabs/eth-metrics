@@ -76,11 +76,10 @@ func (r *RelayRewards) GetRelayRewards(
 		time.Sleep(250 * time.Millisecond)
 		slot := epoch*slotsInEpoch + i
 		for _, relayServer := range RELAY_SERVERS {
-			relay := relayServer
 			g.Go(func() error {
-				payloads, err := r.getRewards(relay, slot)
+				payloads, err := r.getRewards(relayServer, slot)
 				if err != nil {
-					return errors.Wrap(err, fmt.Sprintf("error getting rewards from %s", relay))
+					return errors.Wrap(err, fmt.Sprintf("error getting rewards from %s", relayServer))
 				}
 				for _, payload := range payloads {
 					pool, ok := r.validatorKeyToPool[payload.ProposerPubkey]

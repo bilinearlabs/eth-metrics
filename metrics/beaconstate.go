@@ -100,7 +100,9 @@ func (p *BeaconState) Run(
 
 	aggregatedProposerTips := big.NewInt(0)
 	for _, activeValidatorIndex := range activeValidatorIndexes {
-		aggregatedProposerTips.Add(aggregatedProposerTips, proposerTips[activeValidatorIndex])
+		if tip, ok := proposerTips[activeValidatorIndex]; ok {
+			aggregatedProposerTips.Add(aggregatedProposerTips, tip)
+		}
 	}
 	metrics.ProposerTips = aggregatedProposerTips
 
