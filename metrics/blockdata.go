@@ -147,7 +147,7 @@ func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock)
 			tip := new(big.Int).Add(tx.GasTipCap(), header.BaseFee)
 			gasFeeCap := tx.GasFeeCap()
 			var usedGasPrice *big.Int
-			if gasFeeCap.Cmp(tip) > 0 {
+			if gasFeeCap.Cmp(tip) < 0 {
 				usedGasPrice = gasFeeCap
 			} else {
 				usedGasPrice = tip

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/bilinearlabs/eth-metrics/config"
 	"github.com/flashbots/mev-boost-relay/common"
 	"github.com/pkg/errors"
@@ -114,23 +115,18 @@ func (r *RelayRewards) getRewards(relayServer string, slot uint64) ([]common.Bid
 	var resp *http.Response
 	var err error
 
-	maxRetries := 5
-	backoff := 250 * time.Millisecond
-	for attempt := range maxRetries {
+	retryOpts := []retry.Option{
+		retry.Attempts(5),
+		retry.Delay(5 * time.Second),
+	}
+	err = retry.Do(func() error {
 		resp, err = r.httpClient.Get(fmt.Sprintf("%s/relay/v1/data/bidtraces/proposer_payload_delivered?slot=%d", relayServer, slot))
-		if err == nil && resp.StatusCode < 500 {
-			break
+		if err != nil {
+			log.Warnf("error getting rewards from %s: %s. Retrying...", relayServer, err)
+			return errors.Wrap(err, "error getting rewards from "+relayServer)
 		}
-		if resp != nil {
-			resp.Body.Close()
-		}
-		log.Warnf("error getting rewards from %s: %s. Retrying... (%d/%d)", relayServer, err, attempt+1, maxRetries)
-		time.Sleep(backoff)
-		backoff *= 2
-	}
-	if err != nil {
-		return nil, errors.Wrap(err, "error getting rewards")
-	}
+		return nil
+	}, retryOpts...)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
