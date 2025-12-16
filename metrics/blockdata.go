@@ -78,10 +78,27 @@ func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
 
 		block := beaconBlock.Data
 
-		b.extractWithdrawals(block, data.Withdrawals)
+		b.ExtractWithdrawals(block, data.Withdrawals)
 
 		// Extract transaction fees
-		proposerTip, err := b.GetProposerTip(block)
+		blockNumber := b.GetBlockNumber(block)
+
+		retryOpts := []retry.Option{
+			retry.Attempts(5),
+			retry.Delay(5 * time.Second),
+		}
+
+		header, err := b.getBlockHeader(blockNumber, retryOpts)
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting block header and receipts")
+		}
+		rawTxs := b.GetBlockTransactions(block)
+		receipts, err := b.getBlockReceipts(rawTxs, retryOpts)
+		if err != nil {
+			return nil, errors.Wrap(err, "error getting block receipts")
+		}
+
+		proposerTip, err := b.GetProposerTip(block, header, receipts)
 		if err != nil {
 			return nil, errors.Wrap(err, "error getting proposer tip")
 		}
@@ -95,7 +112,7 @@ func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
 	return data, nil
 }
 
-func (b *BlockData) extractWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock, withdrawals map[uint64]*big.Int) {
+func (b *BlockData) ExtractWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock, withdrawals map[uint64]*big.Int) {
 	blockWithdrawals := b.GetBlockWithdrawals(beaconBlock)
 	for _, withdrawal := range blockWithdrawals {
 		idx := uint64(withdrawal.ValidatorIndex)
@@ -106,74 +123,53 @@ func (b *BlockData) extractWithdrawals(beaconBlock *spec.VersionedSignedBeaconBl
 	}
 }
 
-func (b *BlockData) GetProposerTip(beaconBlock *spec.VersionedSignedBeaconBlock) (*big.Int, error) {
-	blockNumber := b.GetBlockNumber(beaconBlock)
+func (b *BlockData) GetProposerTip(
+	beaconBlock *spec.VersionedSignedBeaconBlock,
+	header *types.Header,
+	receipts []*types.Receipt,
+) (*big.Int, error) {
 	rawTxs := b.GetBlockTransactions(beaconBlock)
-	retryOpts := []retry.Option{
-		retry.Attempts(5),
-		retry.Delay(5 * time.Second),
-	}
-	header, err := b.getBlockHeader(blockNumber, retryOpts)
-	if err != nil {
-		return nil, errors.Wrap(err, "error getting block header and receipts")
-	}
+
 	baseFeePerGasBytes := b.GetBaseFeePerGas(beaconBlock)
 	baseFeePerGas := new(big.Int).SetBytes(baseFeePerGasBytes[:])
 
 	tips := big.NewInt(0)
 
-	var g errgroup.Group
-	var mu sync.Mutex
-	// Limit concurrent requests
-	g.SetLimit(10)
+	for i, rawTx := range rawTxs {
+		var tx types.Transaction
+		err := tx.UnmarshalBinary(rawTx)
+		if err != nil {
+			return nil, errors.Wrap(err, "error unmarshalling transaction")
+		}
+		txReceipt := receipts[i]
 
-	for _, rawTx := range rawTxs {
-		g.Go(func() error {
-			var tx types.Transaction
-			err = tx.UnmarshalBinary(rawTx)
-			if err != nil {
-				return errors.Wrap(err, "error unmarshalling transaction")
-			}
-			txReceipt, err := b.getTransactionReceipt(&tx, retryOpts)
-			if err != nil {
-				return errors.Wrap(err, "error getting block receipt")
-			}
-			if err != nil {
-				return errors.Wrap(err, "error unmarshalling transaction")
-			}
-			if tx.Hash() != txReceipt.TxHash {
-				return errors.New("transaction hash mismatch")
-			}
+		if tx.Hash() != txReceipt.TxHash {
+			return nil, errors.New("transaction hash mismatch")
+		}
 
-			tipFee := new(big.Int)
-			gasPrice := tx.GasPrice()
-			gasUsed := big.NewInt(int64(txReceipt.GasUsed))
+		tipFee := new(big.Int)
+		gasPrice := tx.GasPrice()
+		gasUsed := big.NewInt(int64(txReceipt.GasUsed))
 
-			switch tx.Type() {
-			case 0, 1:
-				tipFee.Mul(gasPrice, gasUsed)
-			case 2, 3, 4:
-				tip := new(big.Int).Add(tx.GasTipCap(), header.BaseFee)
-				gasFeeCap := tx.GasFeeCap()
-				var usedGasPrice *big.Int
-				if gasFeeCap.Cmp(tip) < 0 {
-					usedGasPrice = gasFeeCap
-				} else {
-					usedGasPrice = tip
-				}
-				tipFee = new(big.Int).Mul(usedGasPrice, gasUsed)
-			default:
-				return errors.Errorf("unknown transaction type: %d, hash: %s", tx.Type(), tx.Hash().String())
+		switch tx.Type() {
+		case 0, 1:
+			tipFee.Mul(gasPrice, gasUsed)
+		case 2, 3, 4:
+			tip := new(big.Int).Add(tx.GasTipCap(), header.BaseFee)
+			gasFeeCap := tx.GasFeeCap()
+			var usedGasPrice *big.Int
+			if gasFeeCap.Cmp(tip) < 0 {
+				usedGasPrice = gasFeeCap
+			} else {
+				usedGasPrice = tip
 			}
-			mu.Lock()
-			tips.Add(tips, tipFee)
-			mu.Unlock()
-			return nil
-		})
+			tipFee = new(big.Int).Mul(usedGasPrice, gasUsed)
+		default:
+			return nil, errors.Errorf("unknown transaction type: %d, hash: %s", tx.Type(), tx.Hash().String())
+		}
+		tips.Add(tips, tipFee)
 	}
-	if err := g.Wait(); err != nil {
-		return nil, errors.Wrap(err, "error getting proposer tip")
-	}
+
 	burnt := new(big.Int).Mul(big.NewInt(int64(b.GetGasUsed(beaconBlock))), baseFeePerGas)
 	proposerReward := new(big.Int).Sub(tips, burnt)
 	return proposerReward, nil
@@ -201,6 +197,38 @@ func (b *BlockData) getBlockHeader(
 	}
 
 	return header, nil
+}
+
+func (b *BlockData) getBlockReceipts(rawTxs []bellatrix.Transaction, retryOpts []retry.Option) ([]*types.Receipt, error) {
+	receipts := make([]*types.Receipt, len(rawTxs))
+	var err error
+
+	var g errgroup.Group
+	var mu sync.Mutex
+	// Limit concurrent requests
+	g.SetLimit(10)
+
+	for i, rawTx := range rawTxs {
+		g.Go(func() error {
+			var tx types.Transaction
+			err = tx.UnmarshalBinary(rawTx)
+			if err != nil {
+				return errors.Wrap(err, "error unmarshalling transaction")
+			}
+			receipt, err := b.getTransactionReceipt(&tx, retryOpts)
+			if err != nil {
+				return errors.Wrap(err, "error getting transaction receipt")
+			}
+			mu.Lock()
+			receipts[i] = receipt
+			mu.Unlock()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, errors.Wrap(err, "error getting block receipts")
+	}
+	return receipts, nil
 }
 
 func (b *BlockData) getTransactionReceipt(tx *types.Transaction, retryOpts []retry.Option) (*types.Receipt, error) {
