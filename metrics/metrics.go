@@ -358,13 +358,13 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
-	relayRewardsPerPool, err := a.relayRewards.GetRelayRewards(currentEpoch)
+	relayRewardsPerPool, slotsWithMEVRewards, err := a.relayRewards.GetRelayRewards(currentEpoch)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting relay rewards")
 	}
 
-	// Get withdrawals from all blocks of the epoch
-	epochBlockData, err := a.blockData.GetEpochBlockData(currentEpoch)
+	// Get withdrawals and proposer tips from all blocks of the epoch
+	epochBlockData, err := a.blockData.GetEpochBlockData(currentEpoch, slotsWithMEVRewards)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting epoch block data")
 	}

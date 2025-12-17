@@ -32,6 +32,7 @@ type BlockData struct {
 	executionClient   *ethclient.Client
 	networkParameters *NetworkParameters
 	config            *config.Config
+	retryOpts         []retry.Option
 }
 
 func NewBlockData(
@@ -45,10 +46,14 @@ func NewBlockData(
 		executionClient:   executionClient,
 		networkParameters: networkParameters,
 		config:            config,
+		retryOpts: []retry.Option{
+			retry.Attempts(5),
+			retry.Delay(5 * time.Second),
+		},
 	}, nil
 }
 
-func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
+func (b *BlockData) GetEpochBlockData(epoch uint64, slotsWithMEVRewards map[uint64]struct{}) (*EpochBlockData, error) {
 	log.Info("Fetching block data for epoch: ", epoch)
 
 	data := &EpochBlockData{
@@ -80,33 +85,30 @@ func (b *BlockData) GetEpochBlockData(epoch uint64) (*EpochBlockData, error) {
 
 		b.ExtractWithdrawals(block, data.Withdrawals)
 
-		// Extract transaction fees
-		blockNumber := b.GetBlockNumber(block)
+		// Extract transaction fees if block has no MEV rewards
+		if _, ok := slotsWithMEVRewards[slot]; !ok {
+			blockNumber := b.GetBlockNumber(block)
 
-		retryOpts := []retry.Option{
-			retry.Attempts(5),
-			retry.Delay(5 * time.Second),
-		}
+			header, err := b.getBlockHeader(blockNumber)
+			if err != nil {
+				return nil, errors.Wrap(err, "error getting block header and receipts")
+			}
+			rawTxs := b.GetBlockTransactions(block)
+			receipts, err := b.getBlockReceipts(rawTxs)
+			if err != nil {
+				return nil, errors.Wrap(err, "error getting block receipts")
+			}
 
-		header, err := b.getBlockHeader(blockNumber, retryOpts)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting block header and receipts")
+			proposerTip, err := b.GetProposerTip(block, header, receipts)
+			if err != nil {
+				return nil, errors.Wrap(err, "error getting proposer tip")
+			}
+			proposerIndex := b.GetProposerIndex(block)
+			if _, ok := data.ProposerTips[proposerIndex]; !ok {
+				data.ProposerTips[proposerIndex] = big.NewInt(0)
+			}
+			data.ProposerTips[proposerIndex].Add(data.ProposerTips[proposerIndex], proposerTip)
 		}
-		rawTxs := b.GetBlockTransactions(block)
-		receipts, err := b.getBlockReceipts(rawTxs, retryOpts)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting block receipts")
-		}
-
-		proposerTip, err := b.GetProposerTip(block, header, receipts)
-		if err != nil {
-			return nil, errors.Wrap(err, "error getting proposer tip")
-		}
-		proposerIndex := b.GetProposerIndex(block)
-		if _, ok := data.ProposerTips[proposerIndex]; !ok {
-			data.ProposerTips[proposerIndex] = big.NewInt(0)
-		}
-		data.ProposerTips[proposerIndex].Add(data.ProposerTips[proposerIndex], proposerTip)
 	}
 
 	return data, nil
@@ -177,7 +179,6 @@ func (b *BlockData) GetProposerTip(
 
 func (b *BlockData) getBlockHeader(
 	blockNumber uint64,
-	retryOpts []retry.Option,
 ) (*types.Header, error) {
 	var header *types.Header
 	var err error
@@ -191,7 +192,7 @@ func (b *BlockData) getBlockHeader(
 			return errors.Wrap(err, "error getting header for block")
 		}
 		return nil
-	}, retryOpts...)
+	}, b.retryOpts...)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting header for block "+blockNumberBig.String())
 	}
@@ -199,7 +200,7 @@ func (b *BlockData) getBlockHeader(
 	return header, nil
 }
 
-func (b *BlockData) getBlockReceipts(rawTxs []bellatrix.Transaction, retryOpts []retry.Option) ([]*types.Receipt, error) {
+func (b *BlockData) getBlockReceipts(rawTxs []bellatrix.Transaction) ([]*types.Receipt, error) {
 	receipts := make([]*types.Receipt, len(rawTxs))
 	var err error
 
@@ -215,7 +216,7 @@ func (b *BlockData) getBlockReceipts(rawTxs []bellatrix.Transaction, retryOpts [
 			if err != nil {
 				return errors.Wrap(err, "error unmarshalling transaction")
 			}
-			receipt, err := b.getTransactionReceipt(&tx, retryOpts)
+			receipt, err := b.getTransactionReceipt(&tx)
 			if err != nil {
 				return errors.Wrap(err, "error getting transaction receipt")
 			}
@@ -231,7 +232,7 @@ func (b *BlockData) getBlockReceipts(rawTxs []bellatrix.Transaction, retryOpts [
 	return receipts, nil
 }
 
-func (b *BlockData) getTransactionReceipt(tx *types.Transaction, retryOpts []retry.Option) (*types.Receipt, error) {
+func (b *BlockData) getTransactionReceipt(tx *types.Transaction) (*types.Receipt, error) {
 	var receipt *types.Receipt
 	var err error
 	err = retry.Do(func() error {
@@ -241,7 +242,7 @@ func (b *BlockData) getTransactionReceipt(tx *types.Transaction, retryOpts []ret
 			return errors.Wrap(err, "error getting transaction receipt")
 		}
 		return nil
-	}, retryOpts...)
+	}, b.retryOpts...)
 
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting transaction receipt for tx "+tx.Hash().String())
