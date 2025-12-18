@@ -10,11 +10,14 @@ import (
 	"strings"
 	"time"
 
+	nethttp "net/http"
+
 	"github.com/attestantio/go-eth2-client/api"
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
-	"github.com/attestantio/go-eth2-client/spec/capella"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/rs/zerolog"
 
 	"github.com/bilinearlabs/eth-metrics/config"
@@ -35,12 +38,14 @@ type Metrics struct {
 	config               *config.Config
 	db                   *db.Database
 	httpClient           *http.Service
+	executionClient      *ethclient.Client
 	validatorKeysPerPool map[string][][]byte
 	validatorKeyToPool   map[string]string
 	beaconState          *BeaconState
 	proposalDuties       *ProposalDuties
 	relayRewards         *RelayRewards
 	networkStats         *NetworkStats
+	blockData            *BlockData
 }
 
 func NewMetrics(
@@ -136,6 +141,21 @@ func NewMetrics(
 	log.Info("Slots per epoch: ", slotsPerEpoch)
 	log.Info("Seconds per slot: ", secondsPerSlot)
 
+	rcpClient, err := rpc.DialOptions(
+		context.Background(),
+		config.Eth1Address,
+		rpc.WithHTTPAuth(func(h nethttp.Header) error {
+			h.Set("Authorization", "Basic "+encodedCredentials)
+			return nil
+		}),
+		rpc.WithHTTPClient(&nethttp.Client{Timeout: 60 * time.Second}),
+	)
+	if err != nil {
+		return nil, errors.Wrap(err, "error dialing execution client")
+	}
+
+	executionClient := ethclient.NewClient(rcpClient)
+
 	networkParameters := &NetworkParameters{
 		genesisSeconds: uint64(genesis.Data.GenesisTime.Unix()),
 		slotsInEpoch:   slotsPerEpoch,
@@ -146,6 +166,7 @@ func NewMetrics(
 		networkParameters:    networkParameters,
 		db:                   database,
 		httpClient:           httpClient,
+		executionClient:      executionClient,
 		config:               config,
 		validatorKeysPerPool: validatorKeysPerPool,
 		validatorKeyToPool:   validatorKeyToPool,
@@ -189,6 +210,12 @@ func (a *Metrics) Run() {
 		log.Fatal(err)
 	}
 	a.networkStats = ns
+
+	bd, err := NewBlockData(a.httpClient, a.executionClient, a.networkParameters, a.config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	a.blockData = bd
 
 	for _, poolName := range a.config.PoolNames {
 		// Check that the validator keys are correct
@@ -331,16 +358,18 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
-	relayRewardsPerPool, err := a.relayRewards.GetRelayRewards(currentEpoch)
+	relayRewardsPerPool, slotsWithMEVRewards, err := a.relayRewards.GetRelayRewards(currentEpoch)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting relay rewards")
 	}
 
-	// Get withdrawals from all blocks of the epoch
-	validatorIndexToWithdrawalAmount, err := a.GetEpochWithdrawals(currentEpoch)
+	// Get withdrawals and proposer tips from all blocks of the epoch
+	epochBlockData, err := a.blockData.GetEpochBlockData(currentEpoch, slotsWithMEVRewards)
 	if err != nil {
-		return nil, errors.Wrap(err, "error getting epoch withdrawals")
+		return nil, errors.Wrap(err, "error getting epoch block data")
 	}
+	validatorIndexToWithdrawalAmount := epochBlockData.Withdrawals
+	proposerTips := epochBlockData.ProposerTips
 
 	err = a.networkStats.Run(currentEpoch, currentBeaconState)
 	if err != nil {
@@ -355,7 +384,7 @@ func (a *Metrics) ProcessEpoch(
 		if reward, ok := relayRewardsPerPool[poolName]; ok {
 			relayRewards.Add(relayRewards, reward)
 		}
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount)
+		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount, proposerTips)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}
@@ -393,57 +422,4 @@ func (a *Metrics) GetValidatorKeys(poolName string) (string, [][]byte, error) {
 
 	}
 	return poolName, pubKeysDeposited, nil
-}
-
-func (a *Metrics) GetEpochWithdrawals(epoch uint64) (map[uint64]*big.Int, error) {
-	validatorIndexToWithdrawalAmount := make(map[uint64]*big.Int)
-	firstSlot := epoch * a.networkParameters.slotsInEpoch
-	for slot := firstSlot; slot < firstSlot+a.networkParameters.slotsInEpoch; slot++ {
-		slotStr := strconv.FormatUint(slot, 10)
-		opts := api.SignedBeaconBlockOpts{
-			Block: slotStr,
-		}
-
-		beaconBlock, err := a.httpClient.SignedBeaconBlock(
-			context.Background(),
-			&opts,
-		)
-		if err != nil {
-			// This error is expected in skipped or orphaned blocks
-			if !strings.Contains(err.Error(), "NOT_FOUND") {
-				return nil, errors.Wrap(err, "error getting signed beacon block")
-			}
-			log.Warn("block not found for slot: ", slot)
-			continue
-		}
-		withdrawals := GetBlockWithdrawals(beaconBlock.Data)
-
-		for _, withdrawal := range withdrawals {
-			if _, ok := validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)]; !ok {
-				validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)] = big.NewInt(0)
-			}
-			validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)].Add(validatorIndexToWithdrawalAmount[uint64(withdrawal.ValidatorIndex)], big.NewInt(int64(withdrawal.Amount)))
-		}
-	}
-	return validatorIndexToWithdrawalAmount, nil
-}
-
-func GetBlockWithdrawals(beaconBlock *spec.VersionedSignedBeaconBlock) []*capella.Withdrawal {
-	var withdrawals []*capella.Withdrawal
-	if beaconBlock.Altair != nil {
-		withdrawals = []*capella.Withdrawal{}
-	} else if beaconBlock.Bellatrix != nil {
-		withdrawals = []*capella.Withdrawal{}
-	} else if beaconBlock.Capella != nil {
-		withdrawals = beaconBlock.Capella.Message.Body.ExecutionPayload.Withdrawals
-	} else if beaconBlock.Deneb != nil {
-		withdrawals = beaconBlock.Deneb.Message.Body.ExecutionPayload.Withdrawals
-	} else if beaconBlock.Electra != nil {
-		withdrawals = beaconBlock.Electra.Message.Body.ExecutionPayload.Withdrawals
-	} else if beaconBlock.Fulu != nil {
-		withdrawals = beaconBlock.Fulu.Message.Body.ExecutionPayload.Withdrawals
-	} else {
-		log.Fatal("Beacon state was empty")
-	}
-	return withdrawals
 }

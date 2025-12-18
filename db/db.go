@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS t_pools_metrics_summary (
 	 f_epoch_lost_balace_gwei BIGINT,
 	 f_epoch_effective_balance_gwei BIGINT,
 	 f_mev_rewards_wei BIGINT,
+	 f_proposer_tips_wei BIGINT,
 
 	 f_n_scheduled_blocks BIGINT,
 	 f_n_proposed_blocks BIGINT,
@@ -98,8 +99,9 @@ INSERT INTO t_pools_metrics_summary(
 	f_epoch_effective_balance_gwei,
 	f_epoch_earned_balance_gwei,
 	f_epoch_lost_balace_gwei,
-	f_mev_rewards_wei)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	f_mev_rewards_wei,
+	f_proposer_tips_wei)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (f_epoch, f_pool)
 DO UPDATE SET
    f_timestamp=EXCLUDED.f_timestamp,
@@ -115,7 +117,8 @@ DO UPDATE SET
 	 f_epoch_effective_balance_gwei=EXCLUDED.f_epoch_effective_balance_gwei,
 	 f_epoch_earned_balance_gwei=EXCLUDED.f_epoch_earned_balance_gwei,
 	 f_epoch_lost_balace_gwei=EXCLUDED.f_epoch_lost_balace_gwei,
-	 f_mev_rewards_wei=EXCLUDED.f_mev_rewards_wei
+	 f_mev_rewards_wei=EXCLUDED.f_mev_rewards_wei,
+	 f_proposer_tips_wei=EXCLUDED.f_proposer_tips_wei
 `
 
 // TODO: Add f_epoch_timestamp
@@ -236,6 +239,7 @@ func (a *Database) StoreValidatorPerformance(validatorPerformance schemas.Valida
 		validatorPerformance.EarnedBalance.Int64(),
 		validatorPerformance.LosedBalance.Int64(),
 		validatorPerformance.MEVRewards.Int64(),
+		validatorPerformance.ProposerTips.Int64(),
 	)
 
 	if err != nil {

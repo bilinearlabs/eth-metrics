@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/avast/retry-go/v4"
 	"github.com/bilinearlabs/eth-metrics/config"
 	"github.com/flashbots/mev-boost-relay/common"
 	"github.com/stretchr/testify/assert"
@@ -49,9 +50,10 @@ func TestGetRelayRewards_Success(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Call GetRelayRewards
-	rewards, err := relayRewards.GetRelayRewards(0)
+	rewards, slotsWithRewards, err := relayRewards.GetRelayRewards(0)
 	assert.NoError(t, err)
 	assert.NotNil(t, rewards)
+	assert.NotNil(t, slotsWithRewards)
 
 	// Verify rewards are aggregated correctly
 	// Each slot (2 slots) * each relay server (1 server) = 2 requests
@@ -59,6 +61,7 @@ func TestGetRelayRewards_Success(t *testing.T) {
 	// pool2: 2 * 2 ETH = 4 ETH
 	assert.Equal(t, big.NewInt(2000000000000000000), rewards["pool1"])
 	assert.Equal(t, big.NewInt(4000000000000000000), rewards["pool2"])
+	assert.Len(t, slotsWithRewards, 2)
 }
 
 func TestGetRelayRewards_HTTPError(t *testing.T) {
@@ -81,9 +84,12 @@ func TestGetRelayRewards_HTTPError(t *testing.T) {
 	relayRewards, err := NewRelayRewards(networkParams, validatorKeyToPool, cfg)
 	assert.NoError(t, err)
 
-	rewards, err := relayRewards.GetRelayRewards(0)
+	relayRewards.retryOpts = []retry.Option{retry.Attempts(1)}
+
+	rewards, slotsWithRewards, err := relayRewards.GetRelayRewards(0)
 	assert.Error(t, err)
 	assert.Nil(t, rewards)
+	assert.Nil(t, slotsWithRewards)
 }
 
 func TestGetRelayRewards_InvalidValue(t *testing.T) {
@@ -106,7 +112,10 @@ func TestGetRelayRewards_InvalidValue(t *testing.T) {
 	relayRewards, err := NewRelayRewards(networkParams, validatorKeyToPool, cfg)
 	assert.NoError(t, err)
 
-	rewards, err := relayRewards.GetRelayRewards(0)
+	relayRewards.retryOpts = []retry.Option{retry.Attempts(1)}
+
+	rewards, slotsWithRewards, err := relayRewards.GetRelayRewards(0)
 	assert.Error(t, err)
 	assert.Nil(t, rewards)
+	assert.Nil(t, slotsWithRewards)
 }
