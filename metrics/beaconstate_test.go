@@ -7,6 +7,7 @@ import (
 
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/altair"
+	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 
 	"github.com/stretchr/testify/require"
@@ -87,7 +88,9 @@ func Test_GetValidatorsWithLessBalance(t *testing.T) {
 		[]uint64{0, 1, 2, 3},
 		prevBeaconState,
 		currentBeaconState,
-		map[uint64]*big.Int{})
+		map[uint64]*big.Int{},
+		map[uint64][]*electra.PendingConsolidation{},
+	)
 
 	require.NoError(t, err)
 	require.Equal(t, indexLessBalance, []uint64{0, 2})
@@ -118,7 +121,8 @@ func Test_GetValidatorsWithLessBalance_NonConsecutive(t *testing.T) {
 		[]uint64{},
 		prevBeaconState,
 		currentBeaconState,
-		map[uint64]*big.Int{})
+		map[uint64]*big.Int{},
+		map[uint64][]*electra.PendingConsolidation{})
 
 	require.Error(t, err)
 }
@@ -251,4 +255,36 @@ func Test_IsBitSet(t *testing.T) {
 
 	is = isBitSet(5, 2)
 	require.Equal(t, true, is)
+}
+
+func Test_GetProcessedConsolidations(t *testing.T) {
+	prevBeaconState := &spec.VersionedBeaconState{
+		Electra: &electra.BeaconState{
+			PendingConsolidations: []*electra.PendingConsolidation{
+				{SourceIndex: 0, TargetIndex: 1},
+				{SourceIndex: 2, TargetIndex: 1},
+			},
+			Validators: []*phase0.Validator{
+				{Slashed: false},
+				{Slashed: false},
+				{Slashed: false},
+			},
+		},
+	}
+	currentBeaconState := &spec.VersionedBeaconState{
+		Electra: &electra.BeaconState{
+			PendingConsolidations: []*electra.PendingConsolidation{},
+			Validators: []*phase0.Validator{
+				{Slashed: false},
+				{Slashed: false},
+				{Slashed: true},
+			},
+		},
+	}
+	processedConsolidations := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+
+	require.Equal(t, len(processedConsolidations), 1)
+	require.Equal(t, len(processedConsolidations[1]), 1)
+	require.Equal(t, processedConsolidations[1][0].SourceIndex, phase0.ValidatorIndex(0))
+	require.Equal(t, processedConsolidations[1][0].TargetIndex, phase0.ValidatorIndex(1))
 }
