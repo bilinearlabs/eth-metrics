@@ -351,6 +351,7 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 	prevEpoch := GetSlot(prevBeaconState) / p.networkParameters.slotsInEpoch
 	currEpoch := GetSlot(currentBeaconState) / p.networkParameters.slotsInEpoch
 	prevBalances := GetBalances(prevBeaconState)
+	prevValidators := GetValidators(prevBeaconState)
 	currBalances := GetBalances(currentBeaconState)
 
 	if (prevEpoch + 1) != currEpoch {
@@ -377,10 +378,10 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 		if valWithdrawalAmount, ok := validatorIndexToWithdrawalAmount[valIdx]; ok {
 			currentEpochValBalance.Add(currentEpochValBalance, valWithdrawalAmount)
 		}
-		// Check if there are consolidations and substract source balance
+		// Check if there are consolidations and substract source effective balance
 		if consolidations, ok := validatorIndexToProcessedConsolidation[valIdx]; ok {
 			for _, consolidation := range consolidations {
-				sourceBalance := big.NewInt(0).SetUint64(prevBalances[consolidation.SourceIndex])
+				sourceBalance := big.NewInt(0).SetUint64(uint64(prevValidators[consolidation.SourceIndex].EffectiveBalance))
 				currentEpochValBalance.Sub(currentEpochValBalance, sourceBalance)
 			}
 		}
