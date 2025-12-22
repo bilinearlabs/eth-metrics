@@ -281,10 +281,27 @@ func Test_GetProcessedConsolidations(t *testing.T) {
 			},
 		},
 	}
-	processedConsolidations := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	processedConsolidations, err := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	require.NoError(t, err)
 
 	require.Equal(t, len(processedConsolidations), 1)
 	require.Equal(t, len(processedConsolidations[1]), 1)
 	require.Equal(t, processedConsolidations[1][0].SourceIndex, phase0.ValidatorIndex(0))
 	require.Equal(t, processedConsolidations[1][0].TargetIndex, phase0.ValidatorIndex(1))
+}
+
+func Test_GetProcessedConsolidations_NilPendingConsolidations(t *testing.T) {
+	prevBeaconState := &spec.VersionedBeaconState{
+		Electra: &electra.BeaconState{
+			PendingConsolidations: nil,
+		},
+	}
+	currentBeaconState := &spec.VersionedBeaconState{
+		Electra: &electra.BeaconState{
+			PendingConsolidations: nil,
+		},
+	}
+	processedConsolidations, err := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	require.Error(t, err)
+	require.Nil(t, processedConsolidations)
 }

@@ -358,7 +358,10 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
-	processedConsolidations := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	processedConsolidations, err := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting processed consolidations")
+	}
 
 	relayRewardsPerPool, slotsWithMEVRewards, err := a.relayRewards.GetRelayRewards(currentEpoch)
 	if err != nil {

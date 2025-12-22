@@ -492,28 +492,30 @@ func isBitSet(input uint8, n int) bool {
 func GetProcessedConsolidations(
 	prevBeaconState *spec.VersionedBeaconState,
 	currentBeaconState *spec.VersionedBeaconState,
-) map[uint64][]*electra.PendingConsolidation {
+) (map[uint64][]*electra.PendingConsolidation, error) {
 	consolidations := make(map[uint64][]*electra.PendingConsolidation)
 
 	validators := GetValidators(currentBeaconState)
 	prevPendingConsolidations := GetPendingConsolidations(prevBeaconState)
 	currPendingConsolidations := GetPendingConsolidations(currentBeaconState)
 
-	if prevPendingConsolidations == nil {
-		return consolidations
+	if prevPendingConsolidations == nil || currPendingConsolidations == nil {
+		return nil, errors.New("state with nil pending consolidations found")
+	}
+
+	if len(validators) == 0 {
+		return consolidations, nil
 	}
 
 	// Set of current pending consolidations
-	currPendingConsolidationsSet := make(map[string]bool)
+	currPendingConsolidationsSet := make(map[electra.PendingConsolidation]bool)
 	for _, consolidation := range currPendingConsolidations {
-		key := fmt.Sprintf("%d-%d", consolidation.SourceIndex, consolidation.TargetIndex)
-		currPendingConsolidationsSet[key] = true
+		currPendingConsolidationsSet[*consolidation] = true
 	}
 
 	// If the consolidation is not in the current set, it was processed or source slashed
 	for _, consolidation := range prevPendingConsolidations {
-		key := fmt.Sprintf("%d-%d", consolidation.SourceIndex, consolidation.TargetIndex)
-		if _, ok := currPendingConsolidationsSet[key]; !ok {
+		if _, ok := currPendingConsolidationsSet[*consolidation]; !ok {
 			sourceValidator := validators[consolidation.SourceIndex]
 			if sourceValidator.Slashed {
 				continue
@@ -521,7 +523,7 @@ func GetProcessedConsolidations(
 			consolidations[uint64(consolidation.TargetIndex)] = append(consolidations[uint64(consolidation.TargetIndex)], consolidation)
 		}
 	}
-	return consolidations
+	return consolidations, nil
 }
 
 func logMetrics(
