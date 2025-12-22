@@ -12,6 +12,7 @@ import (
 	"github.com/attestantio/go-eth2-client/http"
 	"github.com/attestantio/go-eth2-client/spec"
 	"github.com/attestantio/go-eth2-client/spec/altair"
+	"github.com/attestantio/go-eth2-client/spec/electra"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/pkg/errors"
 
@@ -55,7 +56,8 @@ func (p *BeaconState) Run(
 	valKeyToIndex map[string]uint64,
 	relayRewards *big.Int,
 	validatorIndexToWithdrawalAmount map[uint64]*big.Int,
-	proposerTips map[uint64]*big.Int) error {
+	proposerTips map[uint64]*big.Int,
+	validatorIndexToProcessedConsolidation map[uint64][]*electra.PendingConsolidation) error {
 
 	if currentBeaconState == nil || prevBeaconState == nil {
 		return errors.New("current or previous beacon state is nil")
@@ -89,7 +91,8 @@ func (p *BeaconState) Run(
 		activeValidatorIndexes,
 		currentBeaconState,
 		prevBeaconState,
-		validatorIndexToWithdrawalAmount)
+		validatorIndexToWithdrawalAmount,
+		validatorIndexToProcessedConsolidation)
 
 	if err != nil {
 		return errors.Wrap(err, "error populating participation and balance")
@@ -179,7 +182,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 	activeValidatorIndexes []uint64,
 	beaconState *spec.VersionedBeaconState,
 	prevBeaconState *spec.VersionedBeaconState,
-	validatorIndexToWithdrawalAmount map[uint64]*big.Int) (schemas.ValidatorPerformanceMetrics, error) {
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int,
+	validatorIndexToProcessedConsolidation map[uint64][]*electra.PendingConsolidation) (schemas.ValidatorPerformanceMetrics, error) {
 
 	metrics := schemas.ValidatorPerformanceMetrics{
 		EarnedBalance:    big.NewInt(0),
@@ -212,7 +216,8 @@ func (p *BeaconState) PopulateParticipationAndBalance(
 		activeValidatorIndexes,
 		prevBeaconState,
 		beaconState,
-		validatorIndexToWithdrawalAmount)
+		validatorIndexToWithdrawalAmount,
+		validatorIndexToProcessedConsolidation)
 
 	if err != nil {
 		return schemas.ValidatorPerformanceMetrics{}, err
@@ -340,11 +345,13 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 	activeValidatorIndexes []uint64,
 	prevBeaconState *spec.VersionedBeaconState,
 	currentBeaconState *spec.VersionedBeaconState,
-	validatorIndexToWithdrawalAmount map[uint64]*big.Int) ([]uint64, *big.Int, *big.Int, error) {
+	validatorIndexToWithdrawalAmount map[uint64]*big.Int,
+	validatorIndexToProcessedConsolidation map[uint64][]*electra.PendingConsolidation) ([]uint64, *big.Int, *big.Int, error) {
 
 	prevEpoch := GetSlot(prevBeaconState) / p.networkParameters.slotsInEpoch
 	currEpoch := GetSlot(currentBeaconState) / p.networkParameters.slotsInEpoch
 	prevBalances := GetBalances(prevBeaconState)
+	prevValidators := GetValidators(prevBeaconState)
 	currBalances := GetBalances(currentBeaconState)
 
 	if (prevEpoch + 1) != currEpoch {
@@ -367,9 +374,18 @@ func (p *BeaconState) GetValidatorsWithLessBalance(
 
 		prevEpochValBalance := big.NewInt(0).SetUint64(prevBalances[valIdx])
 		currentEpochValBalance := big.NewInt(0).SetUint64(currBalances[valIdx])
+		// Check if there is a withdrawal amount and add it to the balance
 		if valWithdrawalAmount, ok := validatorIndexToWithdrawalAmount[valIdx]; ok {
 			currentEpochValBalance.Add(currentEpochValBalance, valWithdrawalAmount)
 		}
+		// Check if there are consolidations and substract source effective balance
+		if consolidations, ok := validatorIndexToProcessedConsolidation[valIdx]; ok {
+			for _, consolidation := range consolidations {
+				sourceBalance := big.NewInt(0).SetUint64(uint64(prevValidators[consolidation.SourceIndex].EffectiveBalance))
+				currentEpochValBalance.Sub(currentEpochValBalance, sourceBalance)
+			}
+		}
+
 		delta := big.NewInt(0).Sub(currentEpochValBalance, prevEpochValBalance)
 
 		if delta.Cmp(big.NewInt(0)) == -1 {
@@ -472,6 +488,43 @@ func (p *BeaconState) GetParticipation(
 // Check if bit n (0..7) is set where 0 is the LSB in little endian
 func isBitSet(input uint8, n int) bool {
 	return (input & (1 << n)) > uint8(0)
+}
+
+func GetProcessedConsolidations(
+	prevBeaconState *spec.VersionedBeaconState,
+	currentBeaconState *spec.VersionedBeaconState,
+) (map[uint64][]*electra.PendingConsolidation, error) {
+	consolidations := make(map[uint64][]*electra.PendingConsolidation)
+
+	validators := GetValidators(currentBeaconState)
+	prevPendingConsolidations := GetPendingConsolidations(prevBeaconState)
+	currPendingConsolidations := GetPendingConsolidations(currentBeaconState)
+
+	if prevPendingConsolidations == nil || currPendingConsolidations == nil {
+		return nil, errors.New("state with nil pending consolidations found")
+	}
+
+	if len(validators) == 0 {
+		return consolidations, nil
+	}
+
+	// Set of current pending consolidations
+	currPendingConsolidationsSet := make(map[electra.PendingConsolidation]bool)
+	for _, consolidation := range currPendingConsolidations {
+		currPendingConsolidationsSet[*consolidation] = true
+	}
+
+	// If the consolidation is not in the current set, it was processed or source slashed
+	for _, consolidation := range prevPendingConsolidations {
+		if _, ok := currPendingConsolidationsSet[*consolidation]; !ok {
+			sourceValidator := validators[consolidation.SourceIndex]
+			if sourceValidator.Slashed {
+				continue
+			}
+			consolidations[uint64(consolidation.TargetIndex)] = append(consolidations[uint64(consolidation.TargetIndex)], consolidation)
+		}
+	}
+	return consolidations, nil
 }
 
 func logMetrics(
@@ -631,4 +684,16 @@ func GetCurrentSyncCommittee(beaconState *spec.VersionedBeaconState) []phase0.BL
 		log.Fatal("Beacon state was empty")
 	}
 	return pubKeys
+}
+
+func GetPendingConsolidations(beaconState *spec.VersionedBeaconState) []*electra.PendingConsolidation {
+	var pendingConsolidations []*electra.PendingConsolidation
+	if beaconState.Electra != nil {
+		pendingConsolidations = beaconState.Electra.PendingConsolidations
+	} else if beaconState.Fulu != nil {
+		pendingConsolidations = beaconState.Fulu.PendingConsolidations
+	} else {
+		log.Fatal("Beacon state was empty")
+	}
+	return pendingConsolidations
 }

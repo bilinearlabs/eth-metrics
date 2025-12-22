@@ -358,6 +358,11 @@ func (a *Metrics) ProcessEpoch(
 	// Map to quickly convert public keys to index
 	valKeyToIndex := PopulateKeysToIndexesMap(currentBeaconState)
 
+	processedConsolidations, err := GetProcessedConsolidations(prevBeaconState, currentBeaconState)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting processed consolidations")
+	}
+
 	relayRewardsPerPool, slotsWithMEVRewards, err := a.relayRewards.GetRelayRewards(currentEpoch)
 	if err != nil {
 		return nil, errors.Wrap(err, "error getting relay rewards")
@@ -384,7 +389,17 @@ func (a *Metrics) ProcessEpoch(
 		if reward, ok := relayRewardsPerPool[poolName]; ok {
 			relayRewards.Add(relayRewards, reward)
 		}
-		err = a.beaconState.Run(pubKeys, poolName, currentBeaconState, prevBeaconState, valKeyToIndex, relayRewards, validatorIndexToWithdrawalAmount, proposerTips)
+		err = a.beaconState.Run(
+			pubKeys,
+			poolName,
+			currentBeaconState,
+			prevBeaconState,
+			valKeyToIndex,
+			relayRewards,
+			validatorIndexToWithdrawalAmount,
+			proposerTips,
+			processedConsolidations,
+		)
 		if err != nil {
 			return nil, errors.Wrap(err, "error running beacon state")
 		}
